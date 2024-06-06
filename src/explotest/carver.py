@@ -8,7 +8,7 @@ import typing
 
 import IPython
 
-from explotest.explotest import is_builtin_obj, EXPLORATORY_PREFIX, generate_tests
+from .explotest import is_builtin_obj, EXPLORATORY_PREFIX, generate_tests
 
 
 class RewriteToName(ast.NodeTransformer):

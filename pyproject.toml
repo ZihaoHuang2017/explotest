@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ExploTest"
-version = "0.0.1"
+version = "0.1.0"
 authors = [
 {name="Zihao Huang", email="zihaohuang2017@gmail.com"}
 ]
-description = "A small example package"
+description = "ExploTest"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

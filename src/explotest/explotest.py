@@ -12,7 +12,7 @@ from IPython.core.error import StdinNotImplementedError
 from IPython.core.magic_arguments import magic_arguments, argument, parse_argstring
 from IPython.utils import io
 
-from explotest.carver import call_string, Carver
+from .carver import call_string, Carver
 
 INDENT_SIZE = 4
 EXPLORATORY_PREFIX = "--explore"
