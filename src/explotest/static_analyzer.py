@@ -173,8 +173,10 @@ def bruh(bar: Bar):
     print("--explore", bar.name)
     return bar
 
+
 def bruh2():
     return bruh(Bar("oof"))
+
 
 def func15():
     w = func14()
