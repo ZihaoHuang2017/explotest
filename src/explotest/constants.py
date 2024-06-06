@@ -1,0 +1,2 @@
+INDENT_SIZE = 4
+EXPLORATORY_PREFIX = "--explore"

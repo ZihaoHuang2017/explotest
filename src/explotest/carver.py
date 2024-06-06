@@ -6,9 +6,9 @@ import textwrap
 import types
 import typing
 
-import IPython
-
-from .explotest import is_builtin_obj, EXPLORATORY_PREFIX, generate_tests
+from .generate_tests import generate_tests
+from .utils import is_builtin_obj, CallStatistics
+from .constants import EXPLORATORY_PREFIX
 
 
 class RewriteToName(ast.NodeTransformer):
@@ -23,18 +23,9 @@ class ContainCorrectCall(ast.NodeVisitor):
     def visit_Call(self, node):
         match node:
             case ast.Call(
-                func=ast.Name(id="print"), args=[ast.Constant(value="--explore"), x]
+                func=ast.Name(id="print"), args=[ast.Constant(value="--explore"), _]
             ):
                 self.is_correct_call = True
-
-
-class CallStatistics:
-    def __init__(self, args, varargs, keywords, fn_locals):
-        self.args = args
-        self.varargs = varargs
-        self.keywords = keywords
-        self.locals: dict = fn_locals
-        self.appendage = []
 
 
 def get_arguments(frame: types.FrameType) -> CallStatistics:
@@ -57,52 +48,9 @@ def get_arguments(frame: types.FrameType) -> CallStatistics:
     )
 
 
-def call_value(argument, ipython: IPython.InteractiveShell) -> str:
-    mode, representation = argument
-    if mode == "DIRECT":
-        return repr(representation)
-    if mode == "PICKLE":
-        unpickled = pickle.loads(representation)
-        for key in ipython.user_ns:
-            if ipython.user_ns[key] == unpickled:
-                return key
-        return f"pickle.loads({representation})"
-    for key in ipython.user_ns:
-        if ipython.user_ns[key] == representation:
-            return key
-    return repr(representation)
-
-
-def call_string(function_name, stat: CallStatistics, ipython) -> str:
-    """Return function_name(arg[0], arg[1], ...) as a string, pickling complex objects"""
-    start_index = 0
-    if len(stat.args) > 0:
-        first_var = stat.args[0]
-        if first_var == "self":
-            start_index = 1
-            function_name = (
-                call_value(stat.locals["self"], ipython) + "." + function_name
-            )
-    arglist = []
-    if stat.varargs is not None:
-        arglist.extend(call_value(stat.locals[x], ipython) for x in stat.varargs)
-
-    arglist.extend(
-        f"{arg}={call_value(stat.locals[arg], ipython)}"
-        for arg in stat.args[start_index:]
-    )
-
-    if stat.keywords is not None:
-        arglist.extend(
-            f"{arg}={call_value(stat.locals[arg], ipython)}" for arg in stat.keywords
-        )
-
-    return f"{function_name}({', '.join(arglist)})"
-
-
 class Carver:
     def __init__(self, parsed_in, ipython, verbose):
-        self.reset()
+        self.calls = dict()
         self.desired_function_name = None
         self.module = None
         self.parsed_in = parsed_in
@@ -119,8 +67,6 @@ class Carver:
                 )
                 self.called_function_name = ast.unparse(y)
 
-    def reset(self):
-        self._calls = {}
 
     # Start of `with` block
     def __enter__(self):
@@ -134,12 +80,12 @@ class Carver:
 
     def add_call(self, function_name, call_stats):
         """Add given call to list of calls"""
-        if function_name not in self._calls:
-            self._calls[function_name] = []
-        self._calls[function_name].append(call_stats)
+        if function_name not in self.calls:
+            self.calls[function_name] = []
+        self.calls[function_name].append(call_stats)
 
     # Tracking function: Record all calls and all args
-    def traceit(self, frame: types.FrameType, event, arg):
+    def traceit(self, frame: types.FrameType, event, _):
         if event != "call":
             return None
         code = frame.f_code
@@ -171,7 +117,7 @@ class Carver:
                 and value[0] == EXPLORATORY_PREFIX
             ):
                 if self.desired_function_name == self.called_function_name:
-                    self._calls[self.desired_function_name][-1].appendage.extend(
+                    self.calls[self.desired_function_name][-1].appendage.extend(
                         extract_tests_from_frame(
                             value[1],
                             frame,
@@ -181,7 +127,7 @@ class Carver:
                         )
                     )
                 else:
-                    self._calls[self.desired_function_name][-1].appendage.extend(
+                    self.calls[self.desired_function_name][-1].appendage.extend(
                         extract_tests_from_frame(
                             value[1], frame, "ret", self.ipython, self.verbose
                         )
@@ -191,16 +137,16 @@ class Carver:
 
     def calls(self):
         """Return a dictionary of all calls traced."""
-        return self._calls
+        return self.calls
 
     def call_statistics(self, function_name):
         """Return a list of all arguments of the given function
         as (VAR, VALUE) pairs."""
-        return self._calls.get(function_name, [])
+        return self.calls.get(function_name, [])
 
     def called_functions(self):
         """Return all functions called."""
-        return [function_name for function_name in self._calls.keys()]
+        return [function_name for function_name in self.calls.keys()]
 
 
 def extract_tests_from_frame(obj, frame, assignment_target_names, ipython, verbose):
@@ -327,7 +273,7 @@ def extract_loop_params(
                         f"[{index}]",  # TODO: support nonunique lists
                     )
                 }
-            except Exception as e:
+            except Exception:
                 pass
             return dict()
         case (ast.Tuple() | ast.List(), ast.Call(func=ast.Attribute(attr="items"))):
