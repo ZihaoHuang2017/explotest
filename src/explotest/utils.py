@@ -1,6 +1,6 @@
 import ast
 import enum
-import pickle
+import dill as pickle
 
 import IPython
 
@@ -100,33 +100,6 @@ class CallStatistics:
         self.appendage = []
 
 
-def call_string(function_name, stat: CallStatistics, ipython) -> str:
-    """Return function_name(arg[0], arg[1], ...) as a string, pickling complex objects"""
-    start_index = 0
-    if len(stat.args) > 0:
-        first_var = stat.args[0]
-        if first_var == "self":
-            start_index = 1
-            function_name = (
-                call_value(stat.locals["self"], ipython) + "." + function_name
-            )
-    arglist = []
-    if stat.varargs is not None:
-        arglist.extend(call_value(stat.locals[x], ipython) for x in stat.varargs)
-
-    arglist.extend(
-        f"{arg}={call_value(stat.locals[arg], ipython)}"
-        for arg in stat.args[start_index:]
-    )
-
-    if stat.keywords is not None:
-        arglist.extend(
-            f"{arg}={call_value(stat.locals[arg], ipython)}" for arg in stat.keywords
-        )
-
-    return f"{function_name}({', '.join(arglist)})"
-
-
 def call_value(argument, ipython: IPython.InteractiveShell) -> str:
     mode, representation = argument
     if mode == "DIRECT":
@@ -141,3 +114,5 @@ def call_value(argument, ipython: IPython.InteractiveShell) -> str:
         if ipython.user_ns[key] == representation:
             return key
     return repr(representation)
+
+

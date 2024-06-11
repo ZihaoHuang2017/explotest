@@ -11,8 +11,8 @@ from IPython.utils import io
 
 from .carver import Carver
 from .constants import INDENT_SIZE
-from .generate_tests import generate_tests
-from .utils import revise_line_input, call_string
+from .generate_tests import generate_tests, add_call_string
+from .utils import revise_line_input
 
 
 def transform_tests_wrapper(ipython: IPython.InteractiveShell):
@@ -98,13 +98,14 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
                             import_statements.add(
                                 f"from {carver.module.__name__} import {carver.desired_function_name}"
                             )
-                            import_statements.add("import pickle")
-                            normal_statements.append(
-                                "ret = "
-                                + call_string(
-                                    carver.desired_function_name, call_stat, ipython
-                                )
+                            exec("import dill as pickle", ipython.user_global_ns, ipython.user_ns)
+                            call_string, setup = add_call_string(
+                                carver.desired_function_name, call_stat, ipython
                             )
+                            if setup:
+                                import_statements.add("import dill as pickle")
+                                normal_statements.extend(setup)
+                            normal_statements.append("ret = " + call_string)
                         normal_statements.extend(call_stat.appendage)
                     # not the most ideal way if we have some weird crap going on (remote apis???)
                     continue
@@ -118,14 +119,14 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
                 normal_statements.extend(
                     generate_tests(obj_result, var_name, ipython, args.verbose)
                 )
-            except (SyntaxError, NameError):
-                # raise e
+            except (SyntaxError, NameError) as e:
+                raise e
                 continue
-            except Exception as e:
-                import_statements.add("import pytest")
-                normal_statements.append(f"with pytest.raises({type(e).__name__}):")
-                normal_statements.append(" " * INDENT_SIZE + lin)
-                continue
+            # except Exception as e:
+            #     import_statements.add("import pytest")
+            #     normal_statements.append(f"with pytest.raises({type(e).__name__}):")
+            #     normal_statements.append(" " * INDENT_SIZE + lin)
+            #     continue
         for statement in import_statements:
             lines = statement.split("\n")
             for line in lines:

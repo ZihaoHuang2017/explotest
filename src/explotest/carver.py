@@ -1,6 +1,6 @@
 import ast
 import inspect
-import pickle
+import dill as pickle
 import sys
 import textwrap
 import types
@@ -116,7 +116,7 @@ class Carver:
                 and len(value) == 2
                 and value[0] == EXPLORATORY_PREFIX
             ):
-                if self.desired_function_name == self.called_function_name:
+                if self.desired_function_name in self.called_function_name.split("."):
                     self.calls[self.desired_function_name][-1].appendage.extend(
                         extract_tests_from_frame(
                             value[1],
@@ -164,6 +164,7 @@ def extract_tests_from_frame(obj, frame, assignment_target_names, ipython, verbo
     ret = ipython.ev(ast.unparse(name_rewriter.visit(return_type_determiner.ret)))
     name_replacements = match_return_with_assignment(assignment_target_names, ret)
     reparsed_var_expression = ast.parse(explore_expression)
+    print(ast.dump(reparsed_var_expression))
     name_replacer = ReplaceNames(name_replacements)
     var_name = ast.unparse(name_replacer.visit(reparsed_var_expression))
     return generate_tests(obj, var_name, ipython, verbose)
@@ -215,6 +216,7 @@ class ExpressionParser(ast.NodeVisitor):
             name_replacer = ReplaceNamesWithSuffix(self.stack)
             parsed_obj_name = name_replacer.visit(node.args[1])
             self.expression = ast.unparse(parsed_obj_name)
+            print(parsed_obj_name, self.expression)
 
 
 def extract_loop_params(
@@ -340,6 +342,8 @@ class ReplaceNamesWithSuffix(ast.NodeTransformer):
             temp_id, suffix = self.names.get(temp_id)
             suffixes.append(suffix)
         suffixes.reverse()
+        if len(temp_id) >= 2 and temp_id[0] == temp_id[-1] == "'":
+            temp_id = temp_id[0] + temp_id[1:-1].replace("'", "\\'") + temp_id[-1]  # sanitize string
         for suf in suffixes:
             temp_id += suf
         node.id = temp_id

@@ -141,9 +141,21 @@ def func10():
 def func11():
     result = {"a": "b", "c": "d", "e": "f"}
     for i, j in result.items():
+        print("--explore", i)
+        print("--explore", result[i])
         print("--explore", j)
     return result
 
+def func11a():
+    result = {"'a'b": {"'b'a": "a"}, "'c'd": {"'b'a": "a"}, "'e'f": {"'b'a": "a"}}
+    for i, j in result.items():
+        print("--explore", result[i])
+        print("--explore", j)
+        for k, l in j.items():
+            print("--explore", k)
+            print("--explore", l)
+
+    return result
 
 def func12():
     result1 = ["a", "b", "c"]
@@ -164,10 +176,21 @@ def func14():
     result = [[1, 2, 1, 2], [2, 1, 2, 1], [1, 2, 1, 2]]
     for a, b in enumerate(result):
         for c, d in enumerate(b):
+            print("--explore", a)
+            print("--explore", b)
+            print("--explore", c)
             print("--explore", d)
     return result
 
-
+def func15():
+    result = {
+        # '(\'shell-sort\', \'shell_sort\')': "a"
+        "('shell-sort', 'shell_sort')": "a"
+    }
+    for i, j in result.items():
+        print("--explore", i)
+        print("--explore", j)
+    return result
 def bruh(bar: Bar):
     bar.name = "modified\n bruh"
     print("--explore", bar.name)
@@ -176,8 +199,3 @@ def bruh(bar: Bar):
 
 def bruh2():
     return bruh(Bar("oof"))
-
-
-def func15():
-    w = func14()
-    return 1

@@ -4,7 +4,7 @@ import typing
 
 import IPython
 
-from explotest.utils import is_legal_python_obj, get_type_assertion
+from explotest.utils import is_legal_python_obj, get_type_assertion, CallStatistics, call_value
 
 
 def generate_tests(obj: any, var_name: str, ipython, verbose: bool) -> list[str]:
@@ -180,3 +180,53 @@ def generate_concise_tests(
                     )
                     overall_assertions.extend(assertions)
         return var_name, overall_assertions
+
+
+def add_call_string(function_name, stat: CallStatistics, ipython) -> tuple[str, list[str]]:
+    """Return function_name(arg[0], arg[1], ...) as a string, pickling complex objects
+    function call, setup
+    """
+    start_index = 0
+    arg_counter = 0
+    setup_code = []
+    if len(stat.args) > 0:
+        first_var = stat.args[0]
+        if first_var == "self":
+            start_index = 1
+            value, setup = call_value_wrapper(stat.locals["self"], ipython, arg_counter)
+            function_name = value + "." + function_name
+            arg_counter += 1
+            setup_code.extend(setup)
+
+    # TODO: more correct parsing of fn signature
+    arglist = []
+    if stat.varargs is not None:
+        for arg in stat.varargs:
+            value, setup = call_value_wrapper(stat.locals[arg], ipython, arg_counter)
+            arglist.append(value)
+            arg_counter += 1
+            setup_code.extend(setup)
+
+    for arg in stat.args[start_index:]:
+        value, setup = call_value_wrapper(stat.locals[arg], ipython, arg_counter)
+        arglist.append(f"{arg}={value}")
+        arg_counter += 1
+        setup_code.extend(setup)
+
+    if stat.keywords is not None:
+        for arg in stat.keywords:
+            value, setup = call_value_wrapper(stat.locals[arg], ipython, arg_counter)
+            arglist.append(f"{arg}={value}")
+            arg_counter += 1
+            setup_code.extend(setup)
+
+    return f"{function_name}({', '.join(arglist)})", setup_code
+
+
+def call_value_wrapper(argument, ipython: IPython.InteractiveShell, curr_counter) -> tuple[str, list[str]]:
+    result = call_value(argument, ipython)
+    if result.startswith("pickle.loads("):
+        setup_code = [f"arg{curr_counter} = {result}"]
+        setup_code.extend(generate_tests(eval(result, ipython.user_global_ns, ipython.user_ns), f"arg{curr_counter}", ipython, True))
+        return f"arg{curr_counter}", setup_code
+    return result, []
