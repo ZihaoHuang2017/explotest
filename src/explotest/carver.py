@@ -1,4 +1,5 @@
 import ast
+import copy
 import inspect
 import dill as pickle
 import sys
@@ -38,7 +39,7 @@ def get_arguments(frame: types.FrameType) -> CallStatistics:
         value = frame.f_locals[key]
         try:
             if is_builtin_obj(value):
-                function_locals[key] = ("DIRECT", value)
+                function_locals[key] = ("DIRECT", str(value))
             else:
                 function_locals[key] = ("PICKLE", pickle.dumps(value))
         except Exception:
@@ -164,7 +165,6 @@ def extract_tests_from_frame(obj, frame, assignment_target_names, ipython, verbo
     ret = ipython.ev(ast.unparse(name_rewriter.visit(return_type_determiner.ret)))
     name_replacements = match_return_with_assignment(assignment_target_names, ret)
     reparsed_var_expression = ast.parse(explore_expression)
-    print(ast.dump(reparsed_var_expression))
     name_replacer = ReplaceNames(name_replacements)
     var_name = ast.unparse(name_replacer.visit(reparsed_var_expression))
     return generate_tests(obj, var_name, ipython, verbose)
@@ -216,7 +216,6 @@ class ExpressionParser(ast.NodeVisitor):
             name_replacer = ReplaceNamesWithSuffix(self.stack)
             parsed_obj_name = name_replacer.visit(node.args[1])
             self.expression = ast.unparse(parsed_obj_name)
-            print(parsed_obj_name, self.expression)
 
 
 def extract_loop_params(

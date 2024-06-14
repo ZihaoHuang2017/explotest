@@ -38,6 +38,14 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
         individual assertions; if False, then the whole list/dict/tuple will be asserted at once.
         """,
     )
+    @argument(
+        "-d",
+        dest="dest",
+        default=f"./test_resources",
+        help="""
+        The location that the pickled arguments will go.
+        """
+    )
     def transform_tests(parameter_s=""):
         args = parse_argstring(transform_tests, parameter_s)
         outfname = args.filename
@@ -100,7 +108,7 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
                             )
                             exec("import dill as pickle", ipython.user_global_ns, ipython.user_ns)
                             call_string, setup = add_call_string(
-                                carver.desired_function_name, call_stat, ipython
+                                carver.desired_function_name, call_stat, ipython, args.dest, line
                             )
                             if setup:
                                 import_statements.add("import dill as pickle")

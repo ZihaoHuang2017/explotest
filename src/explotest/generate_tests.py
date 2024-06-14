@@ -1,23 +1,31 @@
 import dataclasses
 import enum
+import dill
 import typing
 
 import IPython
-
-from explotest.utils import is_legal_python_obj, get_type_assertion, CallStatistics, call_value
+import pathlib
+from .utils import is_legal_python_obj, get_type_assertion, CallStatistics
 
 
 def generate_tests(obj: any, var_name: str, ipython, verbose: bool) -> list[str]:
-    if verbose:
-        result = generate_verbose_tests(obj, var_name, dict(), ipython)
-    else:
-        representation, assertions = generate_concise_tests(
-            obj, var_name, dict(), True, ipython
-        )
-        result = assertions
-    if len(result) <= 20:  # Arbitrary
-        return result
-    proper_string_representation = str(obj).replace("\n", "\\n")
+    try:
+        if verbose:
+            result = generate_verbose_tests(obj, var_name, dict(), ipython)
+        else:
+            representation, assertions = generate_concise_tests(
+                obj, var_name, dict(), True, ipython
+            )
+            result = assertions
+        if len(result) <= 20:  # Arbitrary
+            return result
+        if "object at 0x" in str(obj):
+            return result[0:10]
+    except Exception as e:
+        print(f"Exception encountered when generating tests for {var_name}", e)
+    if "object at 0x" in str(obj):  # Can't do crap
+        return []
+    proper_string_representation = str(obj).replace('"', '\\"').replace("\n", "\\n")
     return [
         f'assert str({var_name}) == "{proper_string_representation}"'
     ]  # Too lengthy!
@@ -182,7 +190,7 @@ def generate_concise_tests(
         return var_name, overall_assertions
 
 
-def add_call_string(function_name, stat: CallStatistics, ipython) -> tuple[str, list[str]]:
+def add_call_string(function_name, stat: CallStatistics, ipython, dest, line) -> tuple[str, list[str]]:
     """Return function_name(arg[0], arg[1], ...) as a string, pickling complex objects
     function call, setup
     """
@@ -193,7 +201,7 @@ def add_call_string(function_name, stat: CallStatistics, ipython) -> tuple[str, 
         first_var = stat.args[0]
         if first_var == "self":
             start_index = 1
-            value, setup = call_value_wrapper(stat.locals["self"], ipython, arg_counter)
+            value, setup = call_value_wrapper(stat.locals["self"], ipython, f"line{line}_arg{arg_counter}", dest)
             function_name = value + "." + function_name
             arg_counter += 1
             setup_code.extend(setup)
@@ -202,20 +210,20 @@ def add_call_string(function_name, stat: CallStatistics, ipython) -> tuple[str, 
     arglist = []
     if stat.varargs is not None:
         for arg in stat.varargs:
-            value, setup = call_value_wrapper(stat.locals[arg], ipython, arg_counter)
+            value, setup = call_value_wrapper(stat.locals[arg], ipython, f"line{line}_arg{arg_counter}", dest)
             arglist.append(value)
             arg_counter += 1
             setup_code.extend(setup)
 
     for arg in stat.args[start_index:]:
-        value, setup = call_value_wrapper(stat.locals[arg], ipython, arg_counter)
+        value, setup = call_value_wrapper(stat.locals[arg], ipython, f"line{line}_arg{arg_counter}", dest)
         arglist.append(f"{arg}={value}")
         arg_counter += 1
         setup_code.extend(setup)
 
     if stat.keywords is not None:
         for arg in stat.keywords:
-            value, setup = call_value_wrapper(stat.locals[arg], ipython, arg_counter)
+            value, setup = call_value_wrapper(stat.locals[arg], ipython, f"line{line}_arg{arg_counter}", dest)
             arglist.append(f"{arg}={value}")
             arg_counter += 1
             setup_code.extend(setup)
@@ -223,10 +231,22 @@ def add_call_string(function_name, stat: CallStatistics, ipython) -> tuple[str, 
     return f"{function_name}({', '.join(arglist)})", setup_code
 
 
-def call_value_wrapper(argument, ipython: IPython.InteractiveShell, curr_counter) -> tuple[str, list[str]]:
-    result = call_value(argument, ipython)
-    if result.startswith("pickle.loads("):
-        setup_code = [f"arg{curr_counter} = {result}"]
-        setup_code.extend(generate_tests(eval(result, ipython.user_global_ns, ipython.user_ns), f"arg{curr_counter}", ipython, True))
-        return f"arg{curr_counter}", setup_code
-    return result, []
+def call_value_wrapper(argument, ipython: IPython.InteractiveShell, varname, dest) -> tuple[str, list[str]]:
+    mode, representation = argument
+    if mode == "DIRECT":
+        return repr(representation), []
+    if mode == "PICKLE":
+        unpickled = dill.loads(representation)
+        for key in ipython.user_ns:
+            if ipython.user_ns[key] == unpickled:
+                return key, []
+        pathlib.Path(dest).mkdir(parents=True, exist_ok=True)
+        with open(f"{dest}/{varname}", "wb") as f:
+            f.write(representation)
+        setup_code = [f"with open('{dest}/{varname}', 'rb') as f: \n    {varname} = pickle.load(f)"]
+        setup_code.extend(generate_tests(unpickled, varname, ipython, False))
+        return varname, setup_code
+    for key in ipython.user_ns:
+        if ipython.user_ns[key] == representation:
+            return key, []
+    return repr(representation), []

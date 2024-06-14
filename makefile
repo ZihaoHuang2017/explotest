@@ -1,4 +1,4 @@
 build:
 	pip install --editable ./
-	rm -rf ./dist
+	rm -r ./dist
 	python -m build

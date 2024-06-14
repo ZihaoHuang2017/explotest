@@ -1,6 +1,5 @@
 import ast
 import enum
-import dill as pickle
 
 import IPython
 
@@ -27,8 +26,10 @@ def is_legal_python_obj(
 def is_builtin_obj(obj: any) -> bool:
     if type(obj) in [int, str, bool, float, complex]:
         return True
-    if type(obj) in [dict, tuple, set, frozenset]:
+    if type(obj) in [list, dict, tuple, set, frozenset]:
         return all(is_builtin_obj(item) for item in obj)
+    if type(obj) is dict:
+        return all(is_builtin_obj(key) and is_builtin_obj(value) for key, value in obj.items())
     return False
 
 
@@ -98,21 +99,5 @@ class CallStatistics:
         self.keywords = keywords
         self.locals: dict = fn_locals
         self.appendage = []
-
-
-def call_value(argument, ipython: IPython.InteractiveShell) -> str:
-    mode, representation = argument
-    if mode == "DIRECT":
-        return repr(representation)
-    if mode == "PICKLE":
-        unpickled = pickle.loads(representation)
-        for key in ipython.user_ns:
-            if ipython.user_ns[key] == unpickled:
-                return key
-        return f"pickle.loads({representation})"
-    for key in ipython.user_ns:
-        if ipython.user_ns[key] == representation:
-            return key
-    return repr(representation)
 
 
