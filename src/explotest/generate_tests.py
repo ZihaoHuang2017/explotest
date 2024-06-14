@@ -234,7 +234,7 @@ def add_call_string(function_name, stat: CallStatistics, ipython, dest, line) ->
 def call_value_wrapper(argument, ipython: IPython.InteractiveShell, varname, dest) -> tuple[str, list[str]]:
     mode, representation = argument
     if mode == "DIRECT":
-        return repr(representation), []
+        return representation, []
     if mode == "PICKLE":
         unpickled = dill.loads(representation)
         for key in ipython.user_ns:

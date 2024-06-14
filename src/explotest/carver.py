@@ -39,7 +39,7 @@ def get_arguments(frame: types.FrameType) -> CallStatistics:
         value = frame.f_locals[key]
         try:
             if is_builtin_obj(value):
-                function_locals[key] = ("DIRECT", str(value))
+                function_locals[key] = ("DIRECT", repr(value))
             else:
                 function_locals[key] = ("PICKLE", pickle.dumps(value))
         except Exception:

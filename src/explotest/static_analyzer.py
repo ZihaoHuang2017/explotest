@@ -200,3 +200,12 @@ def bruh(bar: Bar):
 
 def bruh2():
     return bruh(Bar("oof"))
+
+def func16(arr: list[int]) -> list[int]:
+    arr[0] = 2
+    print("--explore", arr)
+    return arr
+
+def func17() -> list[int]:
+    arr = [1, 3, 5, 7]
+    return func16(arr)
