@@ -1,5 +1,8 @@
 import ast
 import enum
+from inspect import Parameter
+from types import MappingProxyType
+from typing import NamedTuple
 
 import IPython
 
@@ -29,7 +32,9 @@ def is_builtin_obj(obj: any) -> bool:
     if type(obj) in [list, dict, tuple, set, frozenset]:
         return all(is_builtin_obj(item) for item in obj)
     if type(obj) is dict:
-        return all(is_builtin_obj(key) and is_builtin_obj(value) for key, value in obj.items())
+        return all(
+            is_builtin_obj(key) and is_builtin_obj(value) for key, value in obj.items()
+        )
     return False
 
 
@@ -92,12 +97,8 @@ def assert_recursive_depth(
     return True
 
 
-class CallStatistics:
-    def __init__(self, args, varargs, keywords, fn_locals):
-        self.args = args
-        self.varargs = varargs
-        self.keywords = keywords
-        self.locals: dict = fn_locals
-        self.appendage = []
-
-
+class CallStatistics(NamedTuple):
+    parameters: MappingProxyType[str, Parameter]
+    locals: dict[str, any]
+    is_method_call: bool
+    appendage: list[str]

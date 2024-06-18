@@ -146,6 +146,7 @@ def func11():
         print("--explore", j)
     return result
 
+
 def func11a():
     result = {"'a'b": {"'b'a": "a"}, "'c'd": {"'b'a": "a"}, "'e'f": {"'b'a": "a"}}
     for i, j in result.items():
@@ -156,6 +157,7 @@ def func11a():
             print("--explore", l)
 
     return result
+
 
 def func12():
     result1 = ["a", "b", "c"]
@@ -182,6 +184,7 @@ def func14():
             print("--explore", d)
     return result
 
+
 def func15():
     result = {
         # '(\'shell-sort\', \'shell_sort\')': "a"
@@ -192,6 +195,7 @@ def func15():
         print("--explore", j)
     return result
 
+
 def bruh(bar: Bar):
     bar.name = "modified\n bruh"
     print("--explore", bar.name)
@@ -201,11 +205,26 @@ def bruh(bar: Bar):
 def bruh2():
     return bruh(Bar("oof"))
 
+
 def func16(arr: list[int]) -> list[int]:
     arr[0] = 2
     print("--explore", arr)
     return arr
 
+
 def func17() -> list[int]:
     arr = [1, 3, 5, 7]
     return func16(arr)
+
+
+class Bruh:
+    def __init__(self, bruh):
+        self.bruh = bruh
+
+    def foo(self):
+        temp = self.bruh
+        print("--explore", temp)
+        return temp
+
+def func18():
+    return Bruh(15).foo()

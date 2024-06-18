@@ -1,15 +1,15 @@
 import ast
-import copy
 import inspect
-import dill as pickle
 import sys
 import textwrap
 import types
 import typing
 
+import dill
+
+from .constants import EXPLORATORY_PREFIX
 from .generate_tests import generate_tests
 from .utils import is_builtin_obj, CallStatistics
-from .constants import EXPLORATORY_PREFIX
 
 
 class RewriteToName(ast.NodeTransformer):
@@ -29,45 +29,43 @@ class ContainCorrectCall(ast.NodeVisitor):
                 self.is_correct_call = True
 
 
-def get_arguments(frame: types.FrameType) -> CallStatistics:
+def get_call_statistics(
+    local_variables, current_function, is_method_call
+) -> CallStatistics:
     """Return call arguments in the given frame"""
     # When called, all arguments are local variables
-    arg_info = inspect.getargvalues(frame)
-    local_variables = frame.f_locals.copy()
+    arguments = inspect.signature(current_function)
     function_locals = dict()
     for key in local_variables:
-        value = frame.f_locals[key]
+        value = local_variables[key]
         try:
             if is_builtin_obj(value):
                 function_locals[key] = ("DIRECT", repr(value))
             else:
-                function_locals[key] = ("PICKLE", pickle.dumps(value))
-        except Exception:
+                function_locals[key] = ("PICKLE", dill.dumps(value))
+        except Exception as e:
+            print(f"Non-serialisable local object {key} encountered; exception {e}")
             function_locals[key] = ("NO-GO", value)
-    return CallStatistics(
-        arg_info.args, arg_info.varargs, arg_info.keywords, function_locals
-    )
+    return CallStatistics(arguments.parameters, function_locals, is_method_call, [])
 
 
 class Carver:
     def __init__(self, parsed_in, ipython, verbose):
         self.calls = dict()
-        self.desired_function_name = None
         self.module = None
         self.parsed_in = parsed_in
         self.ipython = ipython
         self.verbose = verbose
         self.assignment_targets = None
-        self.called_function_name = None
         self.visited_functions = set()
-        self.called_function_name = ""
+        self.desired_function = None
+        self.called_function = None
         match parsed_in:
             case ast.Assign(targets=[x], value=ast.Call(func=y)):
                 self.assignment_targets = ipython.ev(
                     ast.unparse(RewriteToName().visit(x))
                 )
-                self.called_function_name = ast.unparse(y)
-
+                self.called_function = ipython.ev(ast.unparse(y))
 
     # Start of `with` block
     def __enter__(self):
@@ -91,25 +89,6 @@ class Carver:
             return None
         code = frame.f_code
         function_name = code.co_name
-
-        if (
-            self.desired_function_name is None
-            and (code.co_filename, function_name) not in self.visited_functions
-        ):
-            self.visited_functions.add((code.co_filename, function_name))
-            try:
-                parsed_ast = ast.parse(textwrap.dedent(inspect.getsource(frame)))
-                correct_call_checker = ContainCorrectCall()
-                correct_call_checker.visit(parsed_ast)
-                if correct_call_checker.is_correct_call:
-                    self.desired_function_name = function_name
-                    self.module = inspect.getmodule(code)
-            except (OSError, SyntaxError):  # Cython Exec
-                pass
-
-        if function_name == self.desired_function_name:
-            call_stats = get_arguments(frame)
-            self.add_call(function_name, call_stats)
         if function_name == "hijack_print":
             value = frame.f_locals["values"]
             if (
@@ -117,8 +96,8 @@ class Carver:
                 and len(value) == 2
                 and value[0] == EXPLORATORY_PREFIX
             ):
-                if self.desired_function_name in self.called_function_name.split("."):
-                    self.calls[self.desired_function_name][-1].appendage.extend(
+                if self.desired_function == self.called_function:
+                    self.calls[self.desired_function.__qualname__][-1].appendage.extend(
                         extract_tests_from_frame(
                             value[1],
                             frame,
@@ -128,12 +107,42 @@ class Carver:
                         )
                     )
                 else:
-                    self.calls[self.desired_function_name][-1].appendage.extend(
+                    self.calls[self.desired_function.__qualname__][-1].appendage.extend(
                         extract_tests_from_frame(
                             value[1], frame, "ret", self.ipython, self.verbose
                         )
                     )
-
+            return None
+        is_method_call = None
+        current_function = None
+        try:
+            if inspect.getsourcelines(frame)[0][0].startswith("    "):
+                assert "self" in frame.f_locals, "No support for nested functions"
+                current_function = getattr(frame.f_locals["self"], function_name)
+                is_method_call = True
+            else:
+                current_function = frame.f_globals[function_name]
+                is_method_call = False
+        except Exception as e:
+            print(f"Can't parse {function_name}: {e}")
+        if current_function is None or not callable(current_function):
+            return None
+        if (
+            self.desired_function is None
+            and current_function.__qualname__ not in self.visited_functions
+        ):
+            self.visited_functions.add(current_function.__qualname__)
+            parsed_ast = ast.parse(textwrap.dedent(inspect.getsource(frame)))
+            correct_call_checker = ContainCorrectCall()
+            correct_call_checker.visit(parsed_ast)
+            if correct_call_checker.is_correct_call:
+                self.module = inspect.getmodule(code)
+                self.desired_function = current_function
+        if current_function == self.desired_function:
+            call_stats = get_call_statistics(
+                frame.f_locals.copy(), current_function, is_method_call
+            )
+            self.add_call(current_function.__qualname__, call_stats)
         return None
 
     def calls(self):
@@ -153,7 +162,7 @@ class Carver:
 def extract_tests_from_frame(obj, frame, assignment_target_names, ipython, verbose):
     caller_frame = frame.f_back
     code_list, global_index_start = inspect.getsourcelines(caller_frame)
-    parsed_ast = ast.parse(inspect.getsource(caller_frame))
+    parsed_ast = ast.parse(textwrap.dedent(inspect.getsource(caller_frame)))
     expression_parser = ExpressionParser(caller_frame, global_index_start)
     expression_parser.visit(parsed_ast)
     explore_expression = expression_parser.expression
@@ -342,7 +351,9 @@ class ReplaceNamesWithSuffix(ast.NodeTransformer):
             suffixes.append(suffix)
         suffixes.reverse()
         if len(temp_id) >= 2 and temp_id[0] == temp_id[-1] == "'":
-            temp_id = temp_id[0] + temp_id[1:-1].replace("'", "\\'") + temp_id[-1]  # sanitize string
+            temp_id = (
+                temp_id[0] + temp_id[1:-1].replace("'", "\\'") + temp_id[-1]
+            )  # sanitize string
         for suf in suffixes:
             temp_id += suf
         node.id = temp_id

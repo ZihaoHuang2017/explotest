@@ -44,7 +44,7 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
         default=f"./test_resources",
         help="""
         The location that the pickled arguments will go.
-        """
+        """,
     )
     def transform_tests(parameter_s=""):
         args = parse_argstring(transform_tests, parameter_s)
@@ -94,26 +94,37 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
                         for stmt in revised_statement:
                             ipython.ex(stmt)
                     normal_statements.extend(revised_statement)
-
+                    print(carver.calls)
+                    if carver.desired_function is None:
+                        continue
                     for call_stat in carver.call_statistics(
-                        carver.desired_function_name
+                        carver.desired_function.__qualname__
                     ):
                         if (
-                            carver.desired_function_name
-                            not in carver.called_function_name.split(".")
-                            and call_stat.appendage != []
+                            carver.desired_function == carver.called_function
+                            or call_stat.appendage == []
                         ):
-                            import_statements.add(
-                                f"from {carver.module.__name__} import {carver.desired_function_name}"
-                            )
-                            exec("import dill as pickle", ipython.user_global_ns, ipython.user_ns)
-                            call_string, setup = add_call_string(
-                                carver.desired_function_name, call_stat, ipython, args.dest, line
-                            )
-                            if setup:
-                                import_statements.add("import dill as pickle")
-                                normal_statements.extend(setup)
-                            normal_statements.append("ret = " + call_string)
+                            normal_statements.extend(call_stat.appendage)
+                            continue
+                        import_statements.add(
+                            f"from {carver.module.__name__} import {carver.desired_function.__qualname__}"
+                        )
+                        exec(
+                            "import dill as pickle",
+                            ipython.user_global_ns,
+                            ipython.user_ns,
+                        )
+                        call_string, pickle_setup = add_call_string(
+                            carver.desired_function.__name__,
+                            call_stat,
+                            ipython,
+                            args.dest,
+                            line,
+                        )
+                        if pickle_setup:
+                            import_statements.add("import dill as pickle")
+                            normal_statements.extend(pickle_setup)
+                        normal_statements.append("ret = " + call_string)
                         normal_statements.extend(call_stat.appendage)
                     # not the most ideal way if we have some weird crap going on (remote apis???)
                     continue
@@ -162,5 +173,3 @@ def return_hijack_print(original_print):
         original_print(*values, sep=sep, end=end, file=file, flush=flush)
 
     return hijack_print
-
-

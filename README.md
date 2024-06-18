@@ -83,4 +83,8 @@ if __name__ == "__main__":  # When testing
    - A single point of return, situated at the bottom of the file
    - The state is not changed after the print
    - A returned value (if tuples) is a subset of exploratory print expression
-   - The test generated is not super robust; specifically the test generated might not cover the entire list if the iterator loops through all the items (the index isn't retrievable) 
+   - The test generated is not super robust; specifically the test generated might not cover the entire list if 
+   the iterator loops through all the items (the index isn't retrievable)
+   - Either the function is at the top level, or it is directly in some top level class 
+   (i. e. this must be directly retrievable at the top level)
+   - Zero support for anonymous functions. Why would you want to test that?

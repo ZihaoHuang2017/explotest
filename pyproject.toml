@@ -4,16 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ExploTest"
-version = "0.1.3"
+version = "0.1.4"
 authors = [
 {name="Zihao Huang", email="zihaohuang2017@gmail.com"}
 ]
 description = "ExploTest"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-    # Add runtime dependencies here
-]
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [tool.pytest.ini_options]
 addopts = [
@@ -24,5 +25,5 @@ addopts = [
 [tool.setuptools_scm]
 
 [project.urls]
-Homepage = "https://github.com/pypa/sampleproject"
-Issues = "https://github.com/pypa/sampleproject/issues"
+Homepage = "https://github.com/ZihaoHuang2017/test-transformer-ipython"
+Issues = "https://github.com/ZihaoHuang2017/test-transformer-ipython/issues"
