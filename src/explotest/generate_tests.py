@@ -1,13 +1,10 @@
 import dataclasses
 import enum
-from inspect import Parameter
 
-import dill
 import typing
 
 import IPython
-import pathlib
-from .utils import is_legal_python_obj, get_type_assertion, CallStatistics
+from .utils import is_legal_python_obj, get_type_assertion
 
 
 def generate_tests(obj: any, var_name: str, ipython, verbose: bool) -> list[str]:
@@ -192,89 +189,3 @@ def generate_concise_tests(
         return var_name, overall_assertions
 
 
-class Incrementor:
-    def __init__(self):
-        self.arg_counter = 0
-
-
-def add_call_string(
-    function_name, stat: CallStatistics, ipython, dest, line
-) -> tuple[str, list[str]]:
-    """Return function_name(arg[0], arg[1], ...) as a string, pickling complex objects
-    function call, setup
-    """
-    incrementor = Incrementor()
-    setup_code = []
-    arglist = []
-    if stat.is_method_call:
-        value, setup = call_value_wrapper(
-            stat.locals["self"], ipython, line, incrementor, dest
-        )
-        setup_code.extend(setup)
-        function_name = value + "." + function_name
-
-    for (
-        param_name,
-        param_obj,
-    ) in stat.parameters.items():  # note: well-order is guaranteed
-        if param_name in ["/", "*"]:
-            continue
-        match param_obj.kind:
-            case Parameter.POSITIONAL_ONLY:
-                value, setup = call_value_wrapper(
-                    stat.locals[param_name], ipython, line, incrementor, dest
-                )
-                setup_code.extend(setup)
-                arglist.append(value)
-            case Parameter.KEYWORD_ONLY | Parameter.POSITIONAL_OR_KEYWORD:
-                value, setup = call_value_wrapper(
-                    stat.locals[param_name], ipython, line, incrementor, dest
-                )
-                setup_code.extend(setup)
-                arglist.append(f"{param_name}={value}")
-            case Parameter.VAR_POSITIONAL:
-                for arg_name in stat.locals[param_name]:
-                    value, setup = call_value_wrapper(
-                        stat.locals[arg_name], ipython, line, incrementor, dest
-                    )
-                    setup_code.extend(setup)
-                    arglist.append(value)
-            case Parameter.VAR_KEYWORD:
-                for arg_name in stat.locals[param_name]:
-                    value, setup = call_value_wrapper(
-                        stat.locals[arg_name], ipython, line, incrementor, dest
-                    )
-                    setup_code.extend(setup)
-                    arglist.append(f"{arg_name}={value}")
-    return f"{function_name}({', '.join(arglist)})", setup_code
-
-
-def call_value_wrapper(
-    argument,
-    ipython: IPython.InteractiveShell,
-    line: int,
-    incrementor: Incrementor,
-    dest,
-) -> tuple[str, list[str]]:
-    mode, representation = argument
-    varname = f"line{line}_arg{incrementor.arg_counter}"
-    if mode == "DIRECT":
-        return representation, []
-    if mode == "PICKLE":
-        unpickled = dill.loads(representation)
-        for key in ipython.user_ns:
-            if ipython.user_ns[key] == unpickled:
-                return key, []
-        pathlib.Path(dest).mkdir(parents=True, exist_ok=True)
-        full_path = f"{dest}/{varname}"
-        with open(full_path, "wb") as f:
-            f.write(representation)
-        setup_code = [
-            f"with open('{full_path}', 'rb') as f: \n    {varname} = pickle.load(f)"
-        ]
-        setup_code.extend(generate_tests(unpickled, varname, ipython, False))
-        return varname, setup_code
-    for key in ipython.user_ns:
-        if ipython.user_ns[key] == representation:
-            return key, []
-    return repr(representation), []

@@ -167,10 +167,10 @@ def func12():
     return result1, result2
 
 
-def func13():
+def func13a():
     result = [1, 2, 3, 3, 3, 2, 1]
-    for i in result:
-        print("--explore", i)
+    for i, j in enumerate(result):
+        print("--explore", j + 1)
     return result
 
 
@@ -196,14 +196,14 @@ def func15():
     return result
 
 
-def bruh(bar: Bar):
+def bruh(bar: Bar, bar2):
     bar.name = "modified\n bruh"
     print("--explore", bar.name)
     return bar
 
 
 def bruh2():
-    return bruh(Bar("oof"))
+    return bruh(Bar("oof"), Bar("crap"))
 
 
 def func16(arr: list[int]) -> list[int]:
@@ -226,5 +226,19 @@ class Bruh:
         print("--explore", temp)
         return temp
 
+
 def func18():
     return Bruh(15).foo()
+
+
+def mult(a: int, b: int):
+    return a*b
+
+
+def mult_alt(a: int, b: int):
+    result = a*b
+    print("result", result)
+    return result
+
+
+

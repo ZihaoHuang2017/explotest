@@ -1,17 +1,18 @@
 import ast
 import builtins
-import os
 import sys
+import types
 from io import open
+from pathlib import Path
 
 import IPython
 from IPython.core.error import StdinNotImplementedError
 from IPython.core.magic_arguments import magic_arguments, argument, parse_argstring
 from IPython.utils import io
 
-from .carver import Carver
+from .carver import Carver, add_call_string
 from .constants import INDENT_SIZE
-from .generate_tests import generate_tests, add_call_string
+from .generate_tests import generate_tests
 from .utils import revise_line_input
 
 
@@ -54,19 +55,26 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
             # We don't want to close stdout at the end!
             close_at_end = False
         else:
-            outfname = os.path.expanduser(outfname)
-            if os.path.exists(outfname):
+            if Path(outfname).exists():
                 try:
-                    ans = io.ask_yes_no("File %r exists. Overwrite?" % outfname)
+                    ans = io.ask_yes_no(f"File {outfname} exists. Overwrite?")
                 except StdinNotImplementedError:
                     ans = True
                 if not ans:
                     print("Aborting.")
                     return
                 print("Overwriting file.")
-            outfile = open(outfname, "w", encoding="utf-8")
+            outfile = open(Path(outfname), "w", encoding="utf-8")
             close_at_end = True
-
+        if Path(args.dest).exists():
+            try:
+                ans = io.ask_yes_no(f"Dest folder {args.dest} exists. Proceed? (Will potentially override content)")
+            except StdinNotImplementedError:
+                ans = True
+            if not ans:
+                print("Aborting. Specify a folder for test resource using -d")
+                return
+            print("Overwriting directory.")
         import_statements = set()
         normal_statements = []
         output_lines = [0, 0, 0]
@@ -94,7 +102,6 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
                         for stmt in revised_statement:
                             ipython.ex(stmt)
                     normal_statements.extend(revised_statement)
-                    print(carver.calls)
                     if carver.desired_function is None:
                         continue
                     for call_stat in carver.call_statistics(
@@ -106,14 +113,14 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
                         ):
                             normal_statements.extend(call_stat.appendage)
                             continue
-                        import_statements.add(
-                            f"from {carver.module.__name__} import {carver.desired_function.__qualname__}"
-                        )
-                        exec(
-                            "import dill as pickle",
-                            ipython.user_global_ns,
-                            ipython.user_ns,
-                        )
+                        if isinstance(carver.desired_function, types.FunctionType):
+                            import_statements.add(
+                                f"from {carver.desired_function.__module__} import {carver.desired_function.__name__}"
+                            )
+                        else:
+                            import_statements.add(
+                                f"from {carver.desired_function.__module__} import {type(carver.desired_function.__self__).__name__}"
+                            )
                         call_string, pickle_setup = add_call_string(
                             carver.desired_function.__name__,
                             call_stat,

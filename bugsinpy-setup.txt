@@ -1,0 +1,10 @@
+find . -type f -name "bug.info" -exec sed -i 's/.*python_version=.*$/python_version="3.10.13"/' {} \;
+find . -name "requirements.txt" | while read -r file; do
+  # Remove BOM from the file if present
+  dos2unix "$file"
+
+  # Use sed to replace == with >=
+  sed -i 's/==/>=/g' "$file"
+
+  echo "Processed $file"
+done

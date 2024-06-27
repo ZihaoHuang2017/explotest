@@ -1,10 +1,13 @@
 import ast
 import inspect
+import pathlib
 import sys
 import textwrap
 import types
 import typing
+from inspect import Parameter
 
+import IPython
 import dill
 
 from .constants import EXPLORATORY_PREFIX
@@ -29,9 +32,7 @@ class ContainCorrectCall(ast.NodeVisitor):
                 self.is_correct_call = True
 
 
-def get_call_statistics(
-    local_variables, current_function, is_method_call
-) -> CallStatistics:
+def get_call_statistics(local_variables, current_function) -> CallStatistics:
     """Return call arguments in the given frame"""
     # When called, all arguments are local variables
     arguments = inspect.signature(current_function)
@@ -46,19 +47,33 @@ def get_call_statistics(
         except Exception as e:
             print(f"Non-serialisable local object {key} encountered; exception {e}")
             function_locals[key] = ("NO-GO", value)
-    return CallStatistics(arguments.parameters, function_locals, is_method_call, [])
+    return CallStatistics(
+        arguments.parameters,
+        function_locals,
+        isinstance(current_function, types.MethodType),
+        [],
+    )
+
+
+def get_function_obj(frame: types.FrameType, function_name: str) -> types.MethodType | types.FunctionType:
+    if inspect.getsourcelines(frame)[0][0].startswith("    "):
+        assert "self" in frame.f_locals, "No support for nested functions"
+        return getattr(frame.f_locals["self"], function_name)
+    else:
+        return frame.f_globals[function_name]
 
 
 class Carver:
     def __init__(self, parsed_in, ipython, verbose):
         self.calls = dict()
-        self.module = None
-        self.parsed_in = parsed_in
-        self.ipython = ipython
-        self.verbose = verbose
+
+        self.parsed_in: ast.AST = parsed_in
+        self.ipython: IPython.InteractiveShell = ipython
+        self.verbose: bool = verbose
         self.assignment_targets = None
-        self.visited_functions = set()
+        self.visited_function_markers: set[tuple[str, int, str]] = set()
         self.desired_function = None
+        self.desired_function_marker: tuple[str, int, str] = ("", 0, "")
         self.called_function = None
         match parsed_in:
             case ast.Assign(targets=[x], value=ast.Call(func=y)):
@@ -113,50 +128,37 @@ class Carver:
                         )
                     )
             return None
-        is_method_call = None
-        current_function = None
-        try:
-            if inspect.getsourcelines(frame)[0][0].startswith("    "):
-                assert "self" in frame.f_locals, "No support for nested functions"
-                current_function = getattr(frame.f_locals["self"], function_name)
-                is_method_call = True
-            else:
-                current_function = frame.f_globals[function_name]
-                is_method_call = False
-        except Exception as e:
-            print(f"Can't parse {function_name}: {e}")
-        if current_function is None or not callable(current_function):
-            return None
+        function_marker = (
+            code.co_filename,
+            code.co_firstlineno,
+            code.co_name,
+        )
         if (
             self.desired_function is None
-            and current_function.__qualname__ not in self.visited_functions
+            and function_marker not in self.visited_function_markers
         ):
-            self.visited_functions.add(current_function.__qualname__)
-            parsed_ast = ast.parse(textwrap.dedent(inspect.getsource(frame)))
-            correct_call_checker = ContainCorrectCall()
-            correct_call_checker.visit(parsed_ast)
-            if correct_call_checker.is_correct_call:
-                self.module = inspect.getmodule(code)
-                self.desired_function = current_function
-        if current_function == self.desired_function:
-            call_stats = get_call_statistics(
-                frame.f_locals.copy(), current_function, is_method_call
-            )
-            self.add_call(current_function.__qualname__, call_stats)
-        return None
+            self.visited_function_markers.add(function_marker)
+            try:
+                parsed_ast = ast.parse(textwrap.dedent(inspect.getsource(frame)))
+                correct_call_checker = ContainCorrectCall()
+                correct_call_checker.visit(parsed_ast)
+                if correct_call_checker.is_correct_call:
+                    self.desired_function = get_function_obj(frame, function_name)
+                    self.desired_function_marker = function_marker
+            except Exception as e:
+                pass
 
-    def calls(self):
-        """Return a dictionary of all calls traced."""
-        return self.calls
+        if function_marker == self.desired_function_marker:
+            call_stats = get_call_statistics(
+                frame.f_locals.copy(), self.desired_function
+            )
+            self.add_call(self.desired_function.__qualname__, call_stats)
+        return None
 
     def call_statistics(self, function_name):
         """Return a list of all arguments of the given function
         as (VAR, VALUE) pairs."""
         return self.calls.get(function_name, [])
-
-    def called_functions(self):
-        """Return all functions called."""
-        return [function_name for function_name in self.calls.keys()]
 
 
 def extract_tests_from_frame(obj, frame, assignment_target_names, ipython, verbose):
@@ -366,3 +368,95 @@ class DetermineReturnType(ast.NodeVisitor):
 
     def visit_Return(self, node):
         self.ret = node.value
+
+
+class Incrementor:
+    def __init__(self):
+        self.arg_counter = 0
+
+    def get_next_counter(self):
+        self.arg_counter += 1
+        return self.arg_counter
+
+
+def add_call_string(
+    function_name, stat: CallStatistics, ipython, dest, line
+) -> tuple[str, list[str]]:
+    """Return function_name(arg[0], arg[1], ...) as a string, pickling complex objects
+    function call, setup
+    """
+    incrementor = Incrementor()
+    setup_code = []
+    arglist = []
+    if stat.is_method_call:
+        value, setup = call_value_wrapper(
+            stat.locals["self"], ipython, line, incrementor, dest
+        )
+        setup_code.extend(setup)
+        function_name = value + "." + function_name
+
+    for (
+        param_name,
+        param_obj,
+    ) in stat.parameters.items():  # note: well-order is guaranteed
+        if param_name in ["/", "*"]:
+            continue
+        match param_obj.kind:
+            case Parameter.POSITIONAL_ONLY:
+                value, setup = call_value_wrapper(
+                    stat.locals[param_name], ipython, line, incrementor, dest
+                )
+                setup_code.extend(setup)
+                arglist.append(value)
+            case Parameter.KEYWORD_ONLY | Parameter.POSITIONAL_OR_KEYWORD:
+                value, setup = call_value_wrapper(
+                    stat.locals[param_name], ipython, line, incrementor, dest
+                )
+                setup_code.extend(setup)
+                arglist.append(f"{param_name}={value}")
+            case Parameter.VAR_POSITIONAL:
+                for arg_name in stat.locals[param_name]:
+                    value, setup = call_value_wrapper(
+                        stat.locals[arg_name], ipython, line, incrementor, dest
+                    )
+                    setup_code.extend(setup)
+                    arglist.append(value)
+            case Parameter.VAR_KEYWORD:
+                for arg_name in stat.locals[param_name]:
+                    value, setup = call_value_wrapper(
+                        stat.locals[arg_name], ipython, line, incrementor, dest
+                    )
+                    setup_code.extend(setup)
+                    arglist.append(f"{arg_name}={value}")
+    return f"{function_name}({', '.join(arglist)})", setup_code
+
+
+def call_value_wrapper(
+    argument,
+    ipython: IPython.InteractiveShell,
+    line: int,
+    incrementor: Incrementor,
+    dest,
+) -> tuple[str, list[str]]:
+    mode, representation = argument
+    varname = f"line{line}_arg{incrementor.get_next_counter()}"
+    if mode == "DIRECT":
+        return representation, []
+    if mode == "PICKLE":
+        unpickled = dill.loads(representation)
+        for key in ipython.user_ns:
+            if ipython.user_ns[key] == unpickled:
+                return key, []
+        pathlib.Path(dest).mkdir(parents=True, exist_ok=True)
+        full_path = f"{dest}/{varname}"
+        with open(full_path, "wb") as f:
+            f.write(representation)
+        setup_code = [
+            f"with open('{full_path}', 'rb') as f: \n    {varname} = pickle.load(f)"
+        ]
+        setup_code.extend(generate_tests(unpickled, varname, ipython, False))
+        return varname, setup_code
+    for key in ipython.user_ns:
+        if ipython.user_ns[key] == representation:
+            return key, []
+    return repr(representation), []
