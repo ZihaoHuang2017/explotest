@@ -13,7 +13,7 @@ from IPython.utils import io
 from .carver import Carver, add_call_string
 from .constants import INDENT_SIZE
 from .generate_tests import generate_tests
-from .utils import revise_line_input
+from .utils import revise_line_input, has_bad_repr
 
 
 def transform_tests_wrapper(ipython: IPython.InteractiveShell):
@@ -47,33 +47,35 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
         The location that the pickled arguments will go.
         """,
     )
-    def transform_tests_inner(parameter_s=""):
-        transform_tests(ipython, parameter_s)
-    return transform_tests_inner
+    def transform_tests(parameter_s=""):
+        args = parse_argstring(transform_tests, parameter_s)
+        transform_tests_outer(ipython, args.filename, args.verbose, args.dest)
+
+    return transform_tests
 
 
-def transform_tests(ipython: IPython.InteractiveShell, parameter_s: str):
-    args = parse_argstring(transform_tests, parameter_s)
-    outfname = args.filename
-    if not outfname:
+def transform_tests_outer(ipython: IPython.InteractiveShell, filename, verbose, dest):
+    if not filename:
         outfile = sys.stdout  # default
         # We don't want to close stdout at the end!
         close_at_end = False
     else:
-        if Path(outfname).exists():
+        if Path(filename).exists():
             try:
-                ans = io.ask_yes_no(f"File {outfname} exists. Overwrite?")
+                ans = io.ask_yes_no(f"File {filename} exists. Overwrite?")
             except StdinNotImplementedError:
                 ans = True
             if not ans:
                 print("Aborting.")
                 return
             print("Overwriting file.")
-        outfile = open(Path(outfname), "w", encoding="utf-8")
+        outfile = open(Path(filename), "w", encoding="utf-8")
         close_at_end = True
-    if Path(args.dest).exists():
+    if Path(dest).exists():
         try:
-            ans = io.ask_yes_no(f"Dest folder {args.dest} exists. Proceed? (Will potentially override content)")
+            ans = io.ask_yes_no(
+                f"Dest folder {dest} exists. Proceed? (Will potentially override content)"
+            )
         except StdinNotImplementedError:
             ans = True
         if not ans:
@@ -84,37 +86,32 @@ def transform_tests(ipython: IPython.InteractiveShell, parameter_s: str):
     normal_statements = []
     output_lines = [0, 0, 0]
     original_print = builtins.print
-    histories = ipython.history_manager.get_range(output=True)
-    for session, line, (lin, lout) in histories:
+    histories = ipython.history_manager.get_range(output=True, raw=False)
+    nondeterministic_counter = 0
+    for session, line_number, (lin, lout) in histories:
         ipython.builtin_trap.remove_builtin("print", original_print)
-        ipython.builtin_trap.add_builtin(
-            "print", return_hijack_print(original_print)
-        )
+        ipython.builtin_trap.add_builtin("print", return_hijack_print(original_print))
         try:
-            if (
-                    lin.startswith("%")
-                    or lin.endswith("?")
-                    or lin.startswith("get_ipython()")
-            ):  # magic methods
+            if lin.startswith("get_ipython()"):  # magic methods
                 continue
             if lin.startswith("from ") or lin.startswith("import "):
                 import_statements.add(lin)
                 continue
-            revised_statement = revise_line_input(lin, output_lines)
+            revised_statements = revise_line_input(lin, output_lines)
             if lout is None:
-                parsed_in = ast.parse(revised_statement[-1]).body[0]
-                with Carver(parsed_in, ipython, args.verbose) as carver:
-                    for stmt in revised_statement:
+                parsed_in = ast.parse(revised_statements[-1]).body[0]
+                with Carver(parsed_in, ipython, verbose) as carver:
+                    for stmt in revised_statements:
                         ipython.ex(stmt)
-                normal_statements.extend(revised_statement)
+                normal_statements.extend(revised_statements)
                 if carver.desired_function is None:
                     continue
                 for call_stat in carver.call_statistics(
-                        carver.desired_function.__qualname__
+                    carver.desired_function.__qualname__
                 ):
                     if (
-                            carver.desired_function == carver.called_function
-                            or call_stat.appendage == []
+                        carver.desired_function == carver.called_function
+                        or call_stat.appendage == []
                     ):
                         normal_statements.extend(call_stat.appendage)
                         continue
@@ -130,8 +127,8 @@ def transform_tests(ipython: IPython.InteractiveShell, parameter_s: str):
                         carver.desired_function.__name__,
                         call_stat,
                         ipython,
-                        args.dest,
-                        line,
+                        dest,
+                        line_number,
                     )
                     if pickle_setup:
                         import_statements.add("import dill as pickle")
@@ -140,15 +137,18 @@ def transform_tests(ipython: IPython.InteractiveShell, parameter_s: str):
                     normal_statements.extend(call_stat.appendage)
                 # not the most ideal way if we have some weird crap going on (remote apis???)
                 continue
-            output_lines.append(line)
-            var_name = f"_{line}"
-            for index in range(len(revised_statement) - 1):
-                ipython.ex(revised_statement[index])
-            normal_statements.extend(revised_statement[:-1])
-            obj_result = ipython.ev(revised_statement[-1])
-            normal_statements.append(f"{var_name} = {revised_statement[-1]}")
+            output_lines.append(line_number)
+            var_name = f"_{line_number}"
+            for index in range(len(revised_statements) - 1):
+                ipython.ex(revised_statements[index])
+            normal_statements.extend(revised_statements[:-1])
+            obj_result = ipython.ev(revised_statements[-1])
+            if not has_bad_repr(lout) and str(obj_result) != lout:
+                nondeterministic_counter += 1
+                print(f"nondeterministic {obj_result} encountered")
+            normal_statements.append(f"{var_name} = {revised_statements[-1]}")
             normal_statements.extend(
-                generate_tests(obj_result, var_name, ipython, args.verbose)
+                generate_tests(obj_result, var_name, ipython, verbose)
             )
         except (SyntaxError, NameError) as e:
             # raise e
@@ -158,18 +158,20 @@ def transform_tests(ipython: IPython.InteractiveShell, parameter_s: str):
             normal_statements.append(f"with pytest.raises({type(e).__name__}):")
             normal_statements.append(" " * INDENT_SIZE + lin)
             continue
+    print(f"{nondeterministic_counter} nondeterministic objects encountered in total")
     for statement in import_statements:
         lines = statement.split("\n")
-        for line in lines:
-            print(line, file=outfile)
+        for line_number in lines:
+            print(line_number, file=outfile)
     print("\n", file=outfile)
     print("def test_func():", file=outfile)
     for statement in normal_statements:
         lines = statement.split("\n")
-        for line in lines:
-            print(" " * INDENT_SIZE + line, file=outfile)
+        for line_number in lines:
+            print(" " * INDENT_SIZE + line_number, file=outfile)
     if close_at_end:
         outfile.close()
+
 
 def return_hijack_print(original_print):
     def hijack_print(

@@ -232,13 +232,10 @@ def func18():
 
 
 def mult(a: int, b: int):
-    return a*b
+    return a * b
 
 
 def mult_alt(a: int, b: int):
-    result = a*b
+    result = a * b
     print("result", result)
     return result
-
-
-

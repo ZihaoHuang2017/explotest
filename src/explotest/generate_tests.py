@@ -1,13 +1,13 @@
 import dataclasses
 import enum
-
 import typing
 
 import IPython
-from .utils import is_legal_python_obj, get_type_assertion
+
+from .utils import is_legal_python_obj, get_type_assertion, has_bad_repr
 
 
-def generate_tests(obj: any, var_name: str, ipython, verbose: bool) -> list[str]:
+def generate_tests(obj: typing.Any, var_name: str, ipython, verbose: bool) -> list[str]:
     try:
         if verbose:
             result = generate_verbose_tests(obj, var_name, dict(), ipython)
@@ -18,11 +18,11 @@ def generate_tests(obj: any, var_name: str, ipython, verbose: bool) -> list[str]
             result = assertions
         if len(result) <= 20:  # Arbitrary
             return result
-        if "object at 0x" in str(obj):
+        if has_bad_repr(str(obj)):
             return result[0:10]
     except Exception as e:
         print(f"Exception encountered when generating tests for {var_name}", e)
-    if "object at 0x" in str(obj):  # Can't do crap
+    if has_bad_repr(str(obj)):  # Can't do crap
         return []
     proper_string_representation = str(obj).replace('"', '\\"').replace("\n", "\\n")
     return [
@@ -31,7 +31,10 @@ def generate_tests(obj: any, var_name: str, ipython, verbose: bool) -> list[str]
 
 
 def generate_verbose_tests(
-    obj: any, var_name: str, visited: dict[int, str], ipython: IPython.InteractiveShell
+    obj: typing.Any,
+    var_name: str,
+    visited: dict[int, str],
+    ipython: IPython.InteractiveShell,
 ) -> list[str]:
     """Parses the object and generates verbose tests.
 
@@ -39,7 +42,7 @@ def generate_verbose_tests(
     in which case it is necessary to compare the individual fields.
 
     Args:
-        obj (any): The object to be transformed into tests.
+        obj (typing.Any): The object to be transformed into tests.
         var_name (str): The name referring to the object.
         visited (dict[int, str]): A dict associating the obj with the var_names. Used for cycle detection.
         ipython (IPython.InteractiveShell):  bruh
@@ -95,7 +98,7 @@ def generate_verbose_tests(
 
 
 def generate_concise_tests(
-    obj: any,
+    obj: typing.Any,
     var_name: str,
     visited: dict[int, str],
     propagation: bool,
@@ -107,7 +110,7 @@ def generate_concise_tests(
     in which case it is necessary to compare the individual fields.
 
     Args:
-        obj (any): The object to be transformed into tests.
+        obj (typing.Any): The object to be transformed into tests.
         var_name (str): The name referring to the object.
         visited (dict[int, str]): A dict associating the obj with the var_names. Used for cycle detection.
         propagation (bool): Whether the result should be propagated.
@@ -187,5 +190,3 @@ def generate_concise_tests(
                     )
                     overall_assertions.extend(assertions)
         return var_name, overall_assertions
-
-

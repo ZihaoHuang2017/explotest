@@ -2,13 +2,13 @@ import ast
 import enum
 from inspect import Parameter
 from types import MappingProxyType
-from typing import NamedTuple
+import typing
 
 import IPython
 
 
 def get_type_assertion(
-    obj: any, var_name: str, ipython: IPython.InteractiveShell
+    obj: typing.Any, var_name: str, ipython: IPython.InteractiveShell
 ) -> str:
     class_name = type(obj).__name__
     if is_legal_python_obj(class_name, type(obj), ipython):
@@ -18,7 +18,7 @@ def get_type_assertion(
 
 
 def is_legal_python_obj(
-    statement: str, obj: any, ipython: IPython.InteractiveShell
+    statement: str, obj: typing.Any, ipython: IPython.InteractiveShell
 ) -> bool:
     try:
         return obj == ipython.ev(statement)
@@ -26,7 +26,7 @@ def is_legal_python_obj(
         return False
 
 
-def is_builtin_obj(obj: any) -> bool:
+def is_builtin_obj(obj: typing.Any) -> bool:
     if type(obj) in [int, str, bool, float, complex]:
         return True
     if type(obj) in [list, dict, tuple, set, frozenset]:
@@ -62,15 +62,15 @@ def revise_line_input(lin: str, output_lines: list[str]) -> list[str]:
         output_lines[-2],
         output_lines[-3],
     )
-    node = ast.parse(lin)
-    revised_node = RewriteUnderscores(
+    node: ast.Module = ast.parse(lin)
+    revised_node: ast.Module = RewriteUnderscores(
         one_underscore, two_underscores, three_underscores
     ).visit(node)
     return [ast.unparse(stmt) for stmt in revised_node.body]
 
 
 def assert_recursive_depth(
-    obj: any, ipython: IPython.InteractiveShell, visited: list[any]
+    obj: typing.Any, ipython: IPython.InteractiveShell, visited: list[typing.Any]
 ) -> bool:
     if is_legal_python_obj(repr(obj), obj, ipython):
         return True
@@ -97,8 +97,12 @@ def assert_recursive_depth(
     return True
 
 
-class CallStatistics(NamedTuple):
+class CallStatistics(typing.NamedTuple):
     parameters: MappingProxyType[str, Parameter]
-    locals: dict[str, any]
+    locals: dict[str, typing.Any]
     is_method_call: bool
     appendage: list[str]
+
+
+def has_bad_repr(representation: str):
+    return " at 0x" in representation

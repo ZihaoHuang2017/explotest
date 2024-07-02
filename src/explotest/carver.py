@@ -7,6 +7,7 @@ import types
 import typing
 from inspect import Parameter
 
+
 import IPython
 import dill
 
@@ -55,7 +56,9 @@ def get_call_statistics(local_variables, current_function) -> CallStatistics:
     )
 
 
-def get_function_obj(frame: types.FrameType, function_name: str) -> types.MethodType | types.FunctionType:
+def get_function_obj(
+    frame: types.FrameType, function_name: str
+) -> types.MethodType | types.FunctionType:
     if inspect.getsourcelines(frame)[0][0].startswith("    "):
         assert "self" in frame.f_locals, "No support for nested functions"
         return getattr(frame.f_locals["self"], function_name)
@@ -182,8 +185,8 @@ def extract_tests_from_frame(obj, frame, assignment_target_names, ipython, verbo
 
 
 def match_return_with_assignment(
-    assign_to: str or tuple[any] or list[any],
-    return_from: str or tuple[any] or list[any],
+    assign_to: str or tuple[typing.Any] or list[typing.Any],
+    return_from: str or tuple[typing.Any] or list[typing.Any],
 ) -> dict[str, str]:
     match assign_to, return_from:
         case str(), str():
