@@ -185,8 +185,8 @@ def extract_tests_from_frame(obj, frame, assignment_target_names, ipython, verbo
 
 
 def match_return_with_assignment(
-    assign_to: str or tuple[typing.Any] or list[typing.Any],
-    return_from: str or tuple[typing.Any] or list[typing.Any],
+    assign_to: str | tuple[typing.Any] | list[typing.Any],
+    return_from: str | tuple[typing.Any] | list[typing.Any],
 ) -> dict[str, str]:
     match assign_to, return_from:
         case str(), str():

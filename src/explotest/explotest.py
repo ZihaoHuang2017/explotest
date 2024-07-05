@@ -88,9 +88,9 @@ def transform_tests_outer(ipython: IPython.InteractiveShell, filename, verbose, 
     original_print = builtins.print
     histories = ipython.history_manager.get_range(output=True, raw=False)
     nondeterministic_counter = 0
+    ipython.builtin_trap.remove_builtin("print", original_print)
+    ipython.builtin_trap.add_builtin("print", return_hijack_print(original_print))
     for session, line_number, (lin, lout) in histories:
-        ipython.builtin_trap.remove_builtin("print", original_print)
-        ipython.builtin_trap.add_builtin("print", return_hijack_print(original_print))
         try:
             if lin.startswith("get_ipython()"):  # magic methods
                 continue
@@ -99,43 +99,12 @@ def transform_tests_outer(ipython: IPython.InteractiveShell, filename, verbose, 
                 continue
             revised_statements = revise_line_input(lin, output_lines)
             if lout is None:
-                parsed_in = ast.parse(revised_statements[-1]).body[0]
-                with Carver(parsed_in, ipython, verbose) as carver:
-                    for stmt in revised_statements:
-                        ipython.ex(stmt)
-                normal_statements.extend(revised_statements)
-                if carver.desired_function is None:
-                    continue
-                for call_stat in carver.call_statistics(
-                    carver.desired_function.__qualname__
-                ):
-                    if (
-                        carver.desired_function == carver.called_function
-                        or call_stat.appendage == []
-                    ):
-                        normal_statements.extend(call_stat.appendage)
-                        continue
-                    if isinstance(carver.desired_function, types.FunctionType):
-                        import_statements.add(
-                            f"from {carver.desired_function.__module__} import {carver.desired_function.__name__}"
-                        )
-                    else:
-                        import_statements.add(
-                            f"from {carver.desired_function.__module__} import {type(carver.desired_function.__self__).__name__}"
-                        )
-                    call_string, pickle_setup = add_call_string(
-                        carver.desired_function.__name__,
-                        call_stat,
-                        ipython,
-                        dest,
-                        line_number,
+                for statement in revised_statements:
+                    normal_result, import_result = execute_parsed_statement(
+                        ipython, statement, verbose, dest, line_number
                     )
-                    if pickle_setup:
-                        import_statements.add("import dill as pickle")
-                        normal_statements.extend(pickle_setup)
-                    normal_statements.append("ret = " + call_string)
-                    normal_statements.extend(call_stat.appendage)
-                # not the most ideal way if we have some weird crap going on (remote apis???)
+                    normal_statements.extend(normal_result)
+                    import_statements |= import_result
                 continue
             output_lines.append(line_number)
             var_name = f"_{line_number}"
@@ -151,13 +120,13 @@ def transform_tests_outer(ipython: IPython.InteractiveShell, filename, verbose, 
                 generate_tests(obj_result, var_name, ipython, verbose)
             )
         except (SyntaxError, NameError) as e:
-            # raise e
+            raise e
             continue
-        except Exception as e:
-            import_statements.add("import pytest")
-            normal_statements.append(f"with pytest.raises({type(e).__name__}):")
-            normal_statements.append(" " * INDENT_SIZE + lin)
-            continue
+        # except Exception as e:
+        #     import_statements.add("import pytest")
+        #     normal_statements.append(f"with pytest.raises({type(e).__name__}):")
+        #     normal_statements.append(" " * INDENT_SIZE + lin)
+        #     continue
     print(f"{nondeterministic_counter} nondeterministic objects encountered in total")
     for statement in import_statements:
         lines = statement.split("\n")
@@ -171,6 +140,47 @@ def transform_tests_outer(ipython: IPython.InteractiveShell, filename, verbose, 
             print(" " * INDENT_SIZE + line_number, file=outfile)
     if close_at_end:
         outfile.close()
+
+
+def execute_parsed_statement(
+    ipython, statement, verbose, dest, line_number
+) -> tuple[list, set]:
+    parsed_in = ast.parse(statement).body[0]
+
+    with Carver(parsed_in, ipython, verbose) as carver:
+        ipython.ex(statement)
+    if carver.desired_function is None:
+        return [statement], set()
+    normal_result, import_result = [statement], set()
+    for call_stat in carver.call_statistics(carver.desired_function.__qualname__):
+        if (
+            carver.desired_function == carver.called_function
+            or call_stat.appendage == []
+        ):
+            normal_result.extend(call_stat.appendage)
+            continue
+        if isinstance(carver.desired_function, types.FunctionType):
+            import_result.add(
+                f"from {carver.desired_function.__module__} import {carver.desired_function.__name__}"
+            )
+        else:
+            import_result.add(
+                f"from {carver.desired_function.__module__} import {type(carver.desired_function.__self__).__name__}"
+            )
+        call_string, pickle_setup = add_call_string(
+            carver.desired_function.__name__,
+            call_stat,
+            ipython,
+            dest,
+            line_number,
+        )
+        if pickle_setup:
+            import_result.add("import dill as pickle")
+            normal_result.extend(pickle_setup)
+        normal_result.append("ret = " + call_string)
+        normal_result.extend(call_stat.appendage)
+    # not the most ideal way if we have some weird crap going on (remote apis???)
+    return normal_result, import_result
 
 
 def return_hijack_print(original_print):
