@@ -13,7 +13,8 @@ from IPython.utils import io
 from .carver import Carver, add_call_string
 from .constants import INDENT_SIZE
 from .generate_tests import generate_tests
-from .utils import revise_line_input, has_bad_repr
+from .incrementor import Incrementor
+from .utils import revise_line_input, has_bad_repr, PredicateType
 
 
 def transform_tests_wrapper(ipython: IPython.InteractiveShell):
@@ -48,6 +49,7 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
         """,
     )
     def transform_tests(parameter_s=""):
+        print(parameter_s)
         args = parse_argstring(transform_tests, parameter_s)
         transform_tests_outer(ipython, args.filename, args.verbose, args.dest)
 
@@ -146,7 +148,7 @@ def execute_parsed_statement(
     ipython, statement, verbose, dest, line_number
 ) -> tuple[list, set]:
     parsed_in = ast.parse(statement).body[0]
-
+    incrementor = Incrementor()
     with Carver(parsed_in, ipython, verbose) as carver:
         ipython.ex(statement)
     if carver.desired_function is None:
@@ -159,20 +161,18 @@ def execute_parsed_statement(
         ):
             normal_result.extend(call_stat.appendage)
             continue
-        if isinstance(carver.desired_function, types.FunctionType):
-            import_result.add(
-                f"from {carver.desired_function.__module__} import {carver.desired_function.__name__}"
-            )
-        else:
-            import_result.add(
-                f"from {carver.desired_function.__module__} import {type(carver.desired_function.__self__).__name__}"
-            )
+        import_str = get_import_str(call_stat.predicate, carver.desired_function)
+        import_result.add(
+            f"from {carver.desired_function.__module__} import {import_str}"
+        )
+
         call_string, pickle_setup = add_call_string(
             carver.desired_function.__name__,
             call_stat,
             ipython,
             dest,
             line_number,
+            incrementor,
         )
         if pickle_setup:
             import_result.add("import dill as pickle")
@@ -181,6 +181,15 @@ def execute_parsed_statement(
         normal_result.extend(call_stat.appendage)
     # not the most ideal way if we have some weird crap going on (remote apis???)
     return normal_result, import_result
+
+
+def get_import_str(predicate, desired_function):
+    if predicate == PredicateType.NONE:
+        return desired_function.__name__
+    elif predicate == PredicateType.OBJECT:
+        return type(desired_function.__self__).__name__
+    else:
+        return desired_function.__qualname__.split(".")[0]
 
 
 def return_hijack_print(original_print):

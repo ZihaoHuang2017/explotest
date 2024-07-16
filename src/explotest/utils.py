@@ -97,10 +97,16 @@ def assert_recursive_depth(
     return True
 
 
+class PredicateType(enum.Enum):
+    NONE = "NONE"  # module level functions
+    CLASS = "CLASS"  # Class methods, static methods (which are apparently functions)
+    OBJECT = "OBJECT"  # normal methods
+
+
 class CallStatistics(typing.NamedTuple):
     parameters: MappingProxyType[str, Parameter]
     locals: dict[str, typing.Any]
-    is_method_call: bool
+    predicate: PredicateType
     appendage: list[str]
 
 

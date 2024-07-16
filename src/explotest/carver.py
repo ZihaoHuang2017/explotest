@@ -13,62 +13,13 @@ import dill
 
 from .constants import EXPLORATORY_PREFIX
 from .generate_tests import generate_tests
-from .utils import is_builtin_obj, CallStatistics
-
-
-class RewriteToName(ast.NodeTransformer):
-    def visit_Name(self, node):
-        return ast.Constant(node.id)
-
-
-class ContainCorrectCall(ast.NodeVisitor):
-    def __init__(self):
-        self.is_correct_call = False
-
-    def visit_Call(self, node):
-        match node:
-            case ast.Call(
-                func=ast.Name(id="print"), args=[ast.Constant(value="--explore"), _]
-            ):
-                self.is_correct_call = True
-
-
-def get_call_statistics(local_variables, current_function) -> CallStatistics:
-    """Return call arguments in the given frame"""
-    # When called, all arguments are local variables
-    arguments = inspect.signature(current_function)
-    function_locals = dict()
-    for key in local_variables:
-        value = local_variables[key]
-        try:
-            if is_builtin_obj(value):
-                function_locals[key] = ("DIRECT", repr(value))
-            else:
-                function_locals[key] = ("PICKLE", dill.dumps(value))
-        except Exception as e:
-            print(f"Non-serialisable local object {key} encountered; exception {e}")
-            function_locals[key] = ("NO-GO", value)
-    return CallStatistics(
-        arguments.parameters,
-        function_locals,
-        isinstance(current_function, types.MethodType),
-        [],
-    )
-
-
-def get_function_obj(
-    frame: types.FrameType, function_name: str
-) -> types.MethodType | types.FunctionType:
-    if inspect.getsourcelines(frame)[0][0].startswith("    "):
-        assert "self" in frame.f_locals, "No support for nested functions"
-        return getattr(frame.f_locals["self"], function_name)
-    else:
-        return frame.f_globals[function_name]
+from .incrementor import Incrementor
+from .utils import is_builtin_obj, CallStatistics, PredicateType
 
 
 class Carver:
     def __init__(self, parsed_in, ipython, verbose):
-        self.calls = dict()
+        self.calls: dict[str, list[CallStatistics]] = dict()
 
         self.parsed_in: ast.AST = parsed_in
         self.ipython: IPython.InteractiveShell = ipython
@@ -114,6 +65,7 @@ class Carver:
                 and len(value) == 2
                 and value[0] == EXPLORATORY_PREFIX
             ):
+                assert self.desired_function is not None
                 if self.desired_function == self.called_function:
                     self.calls[self.desired_function.__qualname__][-1].appendage.extend(
                         extract_tests_from_frame(
@@ -141,27 +93,99 @@ class Carver:
             and function_marker not in self.visited_function_markers
         ):
             self.visited_function_markers.add(function_marker)
+            correct_call_checker = ContainCorrectCall()
             try:
                 parsed_ast = ast.parse(textwrap.dedent(inspect.getsource(frame)))
-                correct_call_checker = ContainCorrectCall()
                 correct_call_checker.visit(parsed_ast)
-                if correct_call_checker.is_correct_call:
-                    self.desired_function = get_function_obj(frame, function_name)
-                    self.desired_function_marker = function_marker
             except Exception as e:
                 pass
+            if correct_call_checker.is_correct_call:
+                self.desired_function = get_function_obj(frame, function_name)
+                self.desired_function_marker = function_marker
 
         if function_marker == self.desired_function_marker:
-            call_stats = get_call_statistics(
-                frame.f_locals.copy(), self.desired_function
-            )
+            call_stats = get_call_statistics(frame, self.desired_function)
             self.add_call(self.desired_function.__qualname__, call_stats)
         return None
 
-    def call_statistics(self, function_name):
+    def call_statistics(self, function_name) -> list[CallStatistics]:
         """Return a list of all arguments of the given function
         as (VAR, VALUE) pairs."""
         return self.calls.get(function_name, [])
+
+
+class RewriteToName(ast.NodeTransformer):
+    def visit_Name(self, node):
+        return ast.Constant(node.id)
+
+
+class ContainCorrectCall(ast.NodeVisitor):
+    def __init__(self):
+        self.is_correct_call = False
+
+    def visit_Call(self, node):
+        match node:
+            case ast.Call(
+                func=ast.Name(id="print"), args=[ast.Constant(value="--explore"), _]
+            ):
+                self.is_correct_call = True
+
+
+def get_call_statistics(frame, current_function) -> CallStatistics:
+    """Return call arguments in the given frame"""
+    local_vars = frame.f_locals.copy()
+    arguments = inspect.signature(current_function)
+    predicate = determine_predicate(current_function)
+    function_locals = dict()
+    for key in local_vars:
+        value = local_vars[key]
+        function_locals[key] = extract_value(key, value)
+
+    return CallStatistics(
+        arguments.parameters,
+        function_locals,
+        predicate,
+        [],
+    )
+
+
+def get_class_instance(frame):
+    return eval("__class__", frame.f_globals, frame.f_locals)  # hack
+
+
+def extract_value(key, value):
+    try:
+        if is_builtin_obj(value):
+            return "DIRECT", repr(value)
+        else:
+            return "PICKLE", dill.dumps(value)
+    except Exception as e:
+        print(f"Non-serialisable local object {key} encountered; exception {e}")
+        return "NO-GO", value
+
+
+def determine_predicate(function) -> PredicateType:
+    sourcelines = inspect.getsourcelines(function)
+    first_line = sourcelines[0][0]
+    if first_line.startswith("def "):
+        return PredicateType.NONE
+    if first_line.startswith("    @classmethod"):
+        return PredicateType.CLASS
+    return PredicateType.OBJECT
+
+
+def get_function_obj(
+    frame: types.FrameType, function_name: str
+) -> types.MethodType | types.FunctionType:
+    first_line = inspect.getsourcelines(frame)[0][0]
+    if first_line.startswith("    "):
+        # Static methods are cringe so I don't support them
+        if "@classmethod" in first_line:  # please don't use classmethod()
+            return getattr(frame.f_locals["cls"], function_name)
+        assert "self" in frame.f_locals
+        return getattr(frame.f_locals["self"], function_name)
+    else:
+        return frame.f_globals[function_name]
 
 
 def extract_tests_from_frame(obj, frame, assignment_target_names, ipython, verbose):
@@ -373,31 +397,26 @@ class DetermineReturnType(ast.NodeVisitor):
         self.ret = node.value
 
 
-class Incrementor:
-    def __init__(self):
-        self.arg_counter = 0
-
-    def get_next_counter(self):
-        self.arg_counter += 1
-        return self.arg_counter
-
-
 def add_call_string(
-    function_name, stat: CallStatistics, ipython, dest, line
+    function_name, stat: CallStatistics, ipython, dest, line, incrementor
 ) -> tuple[str, list[str]]:
     """Return function_name(arg[0], arg[1], ...) as a string, pickling complex objects
     function call, setup
     """
-    incrementor = Incrementor()
     setup_code = []
     arglist = []
-    if stat.is_method_call:
+    if stat.predicate == PredicateType.OBJECT:
         value, setup = call_value_wrapper(
             stat.locals["self"], ipython, line, incrementor, dest
         )
         setup_code.extend(setup)
         function_name = value + "." + function_name
-
+    elif stat.predicate == PredicateType.CLASS:
+        value, setup = call_value_wrapper(
+            stat.locals["cls"], ipython, line, incrementor, dest
+        )
+        setup_code.extend(setup)
+        function_name = value + "." + function_name
     for (
         param_name,
         param_obj,

@@ -226,6 +226,11 @@ class Bruh:
         print("--explore", temp)
         return temp
 
+    @classmethod
+    def cls_method(cls, arg):
+        print("--explore", arg)
+        return arg
+
 
 def func18():
     return Bruh(15).foo()
@@ -239,3 +244,8 @@ def mult_alt(a: int, b: int):
     result = a * b
     print("result", result)
     return result
+
+
+def func19(bruh):
+    # Bruh.cls_method(bruh)
+    Bruh.static_method(bruh)

@@ -44,15 +44,16 @@ if __name__ == "__main__":
         print("This file does not exist!")
         sys.exit(1)
     infile = open(Path(args.input_filename), "r", encoding="utf-8")
-    end_index = len(sys.argv) - 1
+    end_index = len(sys.argv)
     for index, arg in enumerate(sys.argv):
         if arg == "--":
             end_index = index
     extracted_args = sys.argv[2:end_index]
-    other_args[0] = args.filename  # Simulate the passed in argv
-    ipython.run_cell(
-        f"import sys\nsys.argv = {other_args}", store_history=True
-    )  # We no longer need argv
+    if len(other_args) > 0:
+        other_args[0] = args.filename  # Simulate the passed in argv
+        ipython.run_cell(
+            f"import sys\nsys.argv = {other_args}", store_history=True
+        )  # We no longer need argv
     statements: list[ast.stmt] = ast.parse(infile.read()).body
     for statement in statements:
         match statement:
