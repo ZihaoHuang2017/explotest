@@ -1,3 +1,4 @@
+
 class Bar:
     def __init__(self, name: str):
         self.name = name
@@ -247,5 +248,4 @@ def mult_alt(a: int, b: int):
 
 
 def func19(bruh):
-    # Bruh.cls_method(bruh)
-    Bruh.static_method(bruh)
+    Bruh.cls_method(bruh)

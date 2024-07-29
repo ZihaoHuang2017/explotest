@@ -1,10 +1,14 @@
 import dataclasses
 import enum
+import logging
 import typing
+from collections import deque
 
 import IPython
 
 from .utils import is_legal_python_obj, get_type_assertion, has_bad_repr
+
+logger = logging.getLogger(__name__)
 
 
 def generate_tests(obj: typing.Any, var_name: str, ipython, verbose: bool) -> list[str]:
@@ -18,15 +22,16 @@ def generate_tests(obj: typing.Any, var_name: str, ipython, verbose: bool) -> li
             result = assertions
         if len(result) <= 20:  # Arbitrary
             return result
-        if has_bad_repr(str(obj)):
+        if has_bad_repr(repr(obj)):
             return result[0:10]
     except Exception as e:
         print(f"Exception encountered when generating tests for {var_name}", e)
-    if has_bad_repr(str(obj)):  # Can't do crap
+        raise e
+    if has_bad_repr(repr(obj)):  # Can't do crap
         return []
-    proper_string_representation = str(obj).replace('"', '\\"').replace("\n", "\\n")
+    proper_string_representation = repr(obj)
     return [
-        f'assert str({var_name}) == "{proper_string_representation}"'
+        f'assert repr({var_name}) == "{proper_string_representation}"'
     ]  # Too lengthy!
 
 
@@ -73,7 +78,11 @@ def generate_verbose_tests(
         return [f"assert {var_name} == {visited[id(obj)]}"]
     visited[id(obj)] = var_name
     result = [get_type_assertion(obj, var_name, ipython)]
-    if isinstance(obj, typing.Sequence):
+    if type(obj).__name__ == "ndarray":
+        result.extend(
+            generate_verbose_tests(obj.tolist(), f"{var_name}.tolist()", visited, ipython)
+        )
+    elif isinstance(obj, typing.Sequence):
         for idx, val in enumerate(obj):
             result.extend(
                 generate_verbose_tests(val, f"{var_name}[{idx}]", visited, ipython)
@@ -119,66 +128,81 @@ def generate_concise_tests(
     Returns:
         tuple[str, list[str]]: The repr of the obj if it can be parsed easily, var_name if it can't, and a list of
     """
+
+    logger.info(f"{obj, type(obj), var_name}")
+    queue: deque[tuple[str, typing.Any, bool]] = deque([(var_name, obj, propagation)])
+    result: list[str] = []
+    while queue:
+        var_name, obj, propagation = queue.popleft()
     # readable-repr, assertions
-    if type(type(obj)) is enum.EnumMeta and is_legal_python_obj(
-        type(obj).__name__, type(obj), ipython
-    ):
-        if propagation:
-            return str(obj), [f"assert {var_name} == {str(obj)}"]
-        return str(obj), []
-    if is_legal_python_obj(repr(obj), obj, ipython):
-        if propagation:
-            return repr(obj), generate_verbose_tests(
-                obj, var_name, visited, ipython
-            )  # to be expanded
-        return repr(obj), []
-    if id(obj) in visited:
-        return var_name, [f"assert {var_name} == {visited[id(obj)]}"]
-    visited[id(obj)] = var_name
-    if isinstance(obj, typing.Sequence):
-        reprs, overall_assertions = [], []
-        for idx, val in enumerate(obj):
-            representation, assertions = generate_concise_tests(
-                val, f"{var_name}[{idx}]", visited, False, ipython
-            )
-            reprs.append(representation)
-            overall_assertions.extend(assertions)
-        if type(obj) is tuple:
-            repr_str = f'({", ".join(reprs)})'
-        else:
-            repr_str = f'[{", ".join(reprs)}]'
-        if propagation:
-            overall_assertions.insert(0, f"assert {var_name} == {repr_str}")
-        return repr_str, overall_assertions
-    elif type(obj) is dict:
-        reprs, overall_assertions = [], []
-        for field, value in obj.items():
-            representation, assertions = generate_concise_tests(
-                value, f'{var_name}["{field}"]', visited, False, ipython
-            )
-            reprs.append(f'"{field}": {representation}')
-            overall_assertions.extend(assertions)
-        repr_str = "{" + ", ".join(reprs) + "}"
-        if propagation:
-            overall_assertions.insert(0, f"assert {var_name} == {repr_str}")
-        return repr_str, overall_assertions
-    elif dataclasses.is_dataclass(obj):
-        reprs, overall_assertions = [], []
-        for field in dataclasses.fields(obj):
-            representation, assertions = generate_concise_tests(
-                getattr(obj, field.name),
-                f"{var_name}.{field.name}",
+        if type(type(obj)) is enum.EnumMeta and is_legal_python_obj(
+            type(obj).__name__, type(obj), ipython
+        ):
+            if propagation:
+                return str(obj), [f"assert {var_name} == {str(obj)}"]
+            return str(obj), []
+        if is_legal_python_obj(repr(obj), obj, ipython):
+            if propagation:
+                return repr(obj), generate_verbose_tests(
+                    obj, var_name, visited, ipython
+                )  # to be expanded
+            return repr(obj), []
+        if id(obj) in visited:
+            return var_name, [f"assert {var_name} == {visited[id(obj)]}"]
+        visited[id(obj)] = var_name
+        if type(obj).__name__ == "ndarray":
+            return generate_concise_tests(
+                obj.tolist(),
+                f"{var_name}.tolist()",
                 visited,
                 False,
                 ipython,
             )
-            reprs.append(f'"{field.name}": {representation}')
-            overall_assertions.extend(assertions)
-        repr_str = "{" + ", ".join(reprs) + "}"
-        if propagation:
-            overall_assertions.insert(0, f"assert {var_name} == {repr_str}")
-        return repr_str, overall_assertions
-    else:
+        if type(obj).__name__ in ["Axes", "Bbox"]:  # Known problematic ones
+            return var_name, []
+        if isinstance(obj, typing.Sequence):
+            reprs, overall_assertions = [], []
+            for idx, val in enumerate(obj):
+                representation, assertions = generate_concise_tests(
+                    val, f"{var_name}[{idx}]", visited, False, ipython
+                )
+                reprs.append(representation)
+                overall_assertions.extend(assertions)
+            if type(obj) is tuple:
+                repr_str = f'({", ".join(reprs)})'
+            else:
+                repr_str = f'[{", ".join(reprs)}]'
+            if propagation:
+                overall_assertions.insert(0, f"assert {var_name} == {repr_str}")
+            return repr_str, overall_assertions
+        if type(obj) is dict:
+            reprs, overall_assertions = [], []
+            for field, value in obj.items():
+                representation, assertions = generate_concise_tests(
+                    value, f'{var_name}["{field}"]', visited, False, ipython
+                )
+                reprs.append(f'"{field}": {representation}')
+                overall_assertions.extend(assertions)
+            repr_str = "{" + ", ".join(reprs) + "}"
+            if propagation:
+                overall_assertions.insert(0, f"assert {var_name} == {repr_str}")
+            return repr_str, overall_assertions
+        if dataclasses.is_dataclass(obj):
+            reprs, overall_assertions = [], []
+            for field in dataclasses.fields(obj):
+                representation, assertions = generate_concise_tests(
+                    getattr(obj, field.name),
+                    f"{var_name}.{field.name}",
+                    visited,
+                    False,
+                    ipython,
+                )
+                reprs.append(f'"{field.name}": {representation}')
+                overall_assertions.extend(assertions)
+            repr_str = "{" + ", ".join(reprs) + "}"
+            if propagation:
+                overall_assertions.insert(0, f"assert {var_name} == {repr_str}")
+            return repr_str, overall_assertions
         overall_assertions = [get_type_assertion(obj, var_name, ipython)]
         attrs = dir(obj)
         for attr in attrs:

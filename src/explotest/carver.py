@@ -266,7 +266,7 @@ def extract_loop_params(
         case (ast.Name(), ast.Call(func=ast.Name(id="range"))):
             return {
                 target_node.id: (
-                    str(
+                    repr(
                         eval(
                             target_node.id,
                             caller_frame.f_globals,
@@ -287,7 +287,7 @@ def extract_loop_params(
                 caller_frame.f_locals,
             )
             if isinstance(evaluated_iterator, dict):
-                return {target_node.id: (f'"{obj}"', "")}
+                return {target_node.id: (f'{repr(obj)}', "")}
             if isinstance(evaluated_iterator, typing.Sequence):
                 if override_index == -1:
                     index = evaluated_iterator.index(obj)
@@ -323,10 +323,10 @@ def extract_loop_params(
                 caller_frame.f_locals,
             )
             return {
-                key.id: (f"'{key_str}'", ""),
+                key.id: (f"{repr(key_str)}", ""),
                 value_node.id: (
                     f"{ast.unparse(iterator_node.func.value)}",
-                    f'["{key_str}"]',
+                    f'[{repr(key_str)}]',
                 ),
             }
         case (ast.Tuple() | ast.List(), ast.Call(func=ast.Name(id="enumerate"))):
@@ -381,7 +381,7 @@ class ReplaceNamesWithSuffix(ast.NodeTransformer):
         suffixes.reverse()
         if len(temp_id) >= 2 and temp_id[0] == temp_id[-1] == "'":
             temp_id = (
-                temp_id[0] + temp_id[1:-1].replace("'", "\\'") + temp_id[-1]
+                temp_id[0] + temp_id[1:-1] + temp_id[-1]
             )  # sanitize string
         for suf in suffixes:
             temp_id += suf
@@ -467,7 +467,8 @@ def call_value_wrapper(
     if mode == "PICKLE":
         unpickled = dill.loads(representation)
         for key in ipython.user_ns:
-            if ipython.user_ns[key] == unpickled:
+            obj = ipython.user_ns[key]
+            if type(unpickled) is type(obj) and obj == unpickled:
                 return key, []
         pathlib.Path(dest).mkdir(parents=True, exist_ok=True)
         full_path = f"{dest}/{varname}"

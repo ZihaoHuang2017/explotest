@@ -1,7 +1,7 @@
 import ast
 import builtins
+import logging
 import sys
-import types
 from io import open
 from pathlib import Path
 
@@ -15,6 +15,9 @@ from .constants import INDENT_SIZE
 from .generate_tests import generate_tests
 from .incrementor import Incrementor
 from .utils import revise_line_input, has_bad_repr, PredicateType
+
+
+logger = logging.getLogger(__name__)
 
 
 def transform_tests_wrapper(ipython: IPython.InteractiveShell):
@@ -49,7 +52,6 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
         """,
     )
     def transform_tests(parameter_s=""):
-        print(parameter_s)
         args = parse_argstring(transform_tests, parameter_s)
         transform_tests_outer(ipython, args.filename, args.verbose, args.dest)
 
@@ -57,6 +59,8 @@ def transform_tests_wrapper(ipython: IPython.InteractiveShell):
 
 
 def transform_tests_outer(ipython: IPython.InteractiveShell, filename, verbose, dest):
+    logging.basicConfig(filename="explotest.log", level=logging.INFO)
+    logger.info(f"{filename}, {verbose}, {dest}")
     if not filename:
         outfile = sys.stdout  # default
         # We don't want to close stdout at the end!
@@ -93,6 +97,7 @@ def transform_tests_outer(ipython: IPython.InteractiveShell, filename, verbose, 
     ipython.builtin_trap.remove_builtin("print", original_print)
     ipython.builtin_trap.add_builtin("print", return_hijack_print(original_print))
     for session, line_number, (lin, lout) in histories:
+        logger.info(f"Processing line {line_number}, line {lin}, out {lout}")
         try:
             if lin.startswith("get_ipython()"):  # magic methods
                 continue
@@ -111,20 +116,29 @@ def transform_tests_outer(ipython: IPython.InteractiveShell, filename, verbose, 
             output_lines.append(line_number)
             var_name = f"_{line_number}"
             for index in range(len(revised_statements) - 1):
-                ipython.ex(revised_statements[index])
+                normal_result, import_result = execute_parsed_statement(
+                    ipython, revised_statements[index], verbose, dest, line_number
+                )
+                normal_statements.extend(normal_result)
+                import_statements |= import_result
             normal_statements.extend(revised_statements[:-1])
             obj_result = ipython.ev(revised_statements[-1])
-            if not has_bad_repr(lout) and str(obj_result) != lout:
+            if not has_bad_repr(lout) and repr(obj_result) != lout:
                 nondeterministic_counter += 1
-                print(f"nondeterministic {obj_result} encountered")
+                print(f"nondeterministic {obj_result} encountered {lout}")
             normal_statements.append(f"{var_name} = {revised_statements[-1]}")
+            logger.info(f"obj generated for line {line_number}")
             normal_statements.extend(
                 generate_tests(obj_result, var_name, ipython, verbose)
             )
         except (SyntaxError, NameError) as e:
             raise e
             continue
+        except SystemExit:
+            logger.info(f"System exited")
+            pass
         # except Exception as e:
+        #     logger.info(f"Exception encountered {e}")
         #     import_statements.add("import pytest")
         #     normal_statements.append(f"with pytest.raises({type(e).__name__}):")
         #     normal_statements.append(" " * INDENT_SIZE + lin)
@@ -150,10 +164,10 @@ def execute_parsed_statement(
     parsed_in = ast.parse(statement).body[0]
     incrementor = Incrementor()
     with Carver(parsed_in, ipython, verbose) as carver:
-        ipython.ex(statement)
+        exec_result = sys_exec(ipython, statement)
     if carver.desired_function is None:
-        return [statement], set()
-    normal_result, import_result = [statement], set()
+        return exec_result
+    normal_result, import_result = exec_result
     for call_stat in carver.call_statistics(carver.desired_function.__qualname__):
         if (
             carver.desired_function == carver.called_function
@@ -203,3 +217,11 @@ def return_hijack_print(original_print):
         original_print(*values, sep=sep, end=end, file=file, flush=flush)
 
     return hijack_print
+
+
+def sys_exec(ipython, statement):
+    try:
+        ipython.ex(statement)
+        return [statement], set()  # normal
+    except SystemExit:
+        return [], set()  # system run
