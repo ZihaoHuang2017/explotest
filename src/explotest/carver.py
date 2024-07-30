@@ -287,7 +287,7 @@ def extract_loop_params(
                 caller_frame.f_locals,
             )
             if isinstance(evaluated_iterator, dict):
-                return {target_node.id: (f'{repr(obj)}', "")}
+                return {target_node.id: (f"{repr(obj)}", "")}
             if isinstance(evaluated_iterator, typing.Sequence):
                 if override_index == -1:
                     index = evaluated_iterator.index(obj)
@@ -326,7 +326,7 @@ def extract_loop_params(
                 key.id: (f"{repr(key_str)}", ""),
                 value_node.id: (
                     f"{ast.unparse(iterator_node.func.value)}",
-                    f'[{repr(key_str)}]',
+                    f"[{repr(key_str)}]",
                 ),
             }
         case (ast.Tuple() | ast.List(), ast.Call(func=ast.Name(id="enumerate"))):
@@ -380,9 +380,7 @@ class ReplaceNamesWithSuffix(ast.NodeTransformer):
             suffixes.append(suffix)
         suffixes.reverse()
         if len(temp_id) >= 2 and temp_id[0] == temp_id[-1] == "'":
-            temp_id = (
-                temp_id[0] + temp_id[1:-1] + temp_id[-1]
-            )  # sanitize string
+            temp_id = temp_id[0] + temp_id[1:-1] + temp_id[-1]  # sanitize string
         for suf in suffixes:
             temp_id += suf
         node.id = temp_id

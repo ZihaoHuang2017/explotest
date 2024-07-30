@@ -123,16 +123,17 @@ def transform_tests_outer(ipython: IPython.InteractiveShell, filename, verbose, 
                 import_statements |= import_result
             normal_statements.extend(revised_statements[:-1])
             obj_result = ipython.ev(revised_statements[-1])
+            normal_statements.append(f"{var_name} = {revised_statements[-1]}")
             if not has_bad_repr(lout) and repr(obj_result) != lout:
                 nondeterministic_counter += 1
-                print(f"nondeterministic {obj_result} encountered {lout}")
-            normal_statements.append(f"{var_name} = {revised_statements[-1]}")
-            logger.info(f"obj generated for line {line_number}")
-            normal_statements.extend(
-                generate_tests(obj_result, var_name, ipython, verbose)
-            )
+                print(f"nondeterministic {repr(obj_result)} encountered {repr(lout)}")
+            else:
+                logger.info(f"obj generated for line {line_number}")
+                normal_statements.extend(
+                    generate_tests(obj_result, var_name, ipython, verbose)
+                )
         except (SyntaxError, NameError) as e:
-            raise e
+            # raise e
             continue
         except SystemExit:
             logger.info(f"System exited")
