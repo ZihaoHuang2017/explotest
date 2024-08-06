@@ -477,7 +477,4 @@ def call_value_wrapper(
         ]
         setup_code.extend(generate_tests(unpickled, varname, ipython, False))
         return varname, setup_code
-    for key in ipython.user_ns:
-        if ipython.user_ns[key] == representation:
-            return key, []
     return repr(representation), []

@@ -50,6 +50,8 @@ if __name__ == "__main__":
             end_index = index
     extracted_args = sys.argv[2:end_index]
     if len(other_args) > 0:
+        assert other_args[0] == "--"
+        other_args = other_args[1:]
         other_args = [args.input_filename, *other_args]
         ipython.run_cell(f"import sys", store_history=True)  # We no longer need argv
         ipython.run_cell(f"sys.argv = {other_args}", store_history=True)

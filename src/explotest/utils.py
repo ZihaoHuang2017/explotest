@@ -27,6 +27,8 @@ def is_legal_python_obj(
 
 
 def is_builtin_obj(obj: typing.Any) -> bool:
+    if obj is None:
+        return True
     if type(obj) in [int, str, bool, float, complex]:
         return True
     if type(obj) in [list, dict, tuple, set, frozenset]:

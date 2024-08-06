@@ -70,8 +70,8 @@ def generate_verbose_tests(
                 result.append(f"assert {var_name} is {class_name}")
             else:
                 result.append(f'assert {var_name}.__name__ == "{class_name}"')
-        elif type(obj).__name__ in ["Axes", "Bbox"]:
-            pass
+        elif type(obj).__module__.split(".")[0] in ["pandas", "scipy", "numpy"]:
+            result.append(f"assert str({var_name}) == {repr(str(obj))}")
         elif is_legal_python_obj(repr(obj), obj, ipython):
             result.append(f"assert {var_name} == {repr(obj)}")
         elif id(obj) in visited:
@@ -139,8 +139,8 @@ def generate_concise_tests(
             ]  # to be expanded
         return repr(obj), []
 
-    module_name = type(obj).__module__
-    if module_name in ["numpy", "pandas.core.indexes.base"] or module_name.startswith("scipy") or "_" in module_name:
+    module_name: str = type(obj).__module__
+    if module_name.split(".")[0] in ["pandas", "scipy", "numpy"]:
         return var_name, [(level, f"assert str({var_name}) == {repr(str(obj))}")]
     if id(obj) in visited:
         return var_name, [(level, f"assert {var_name} == {visited[id(obj)]}")]
@@ -164,7 +164,9 @@ def generate_concise_tests(
             repr_str = f'({", ".join(reprs)})'
         else:
             repr_str = f'[{", ".join(reprs)}]'
-        if propagation and useless_repr_count * 2 < repr_count:  # less than 50% useless junk
+        if (
+            propagation and useless_repr_count < repr_count
+        ):  # less than 50% useless junk
             overall_assertions.insert(0, (level, f"assert {var_name} == {repr_str}"))
         return repr_str, overall_assertions
     if type(obj) is dict:
@@ -181,7 +183,7 @@ def generate_concise_tests(
             reprs.append(f"{repr(field)}: {representation}")
             overall_assertions.extend(assertions)
         repr_str = "{" + ", ".join(reprs) + "}"
-        if propagation and useless_repr_count * 2 < repr_count:
+        if propagation and useless_repr_count < repr_count:
             overall_assertions.insert(0, (level, f"assert {var_name} == {repr_str}"))
         return repr_str, overall_assertions
     if dataclasses.is_dataclass(obj):

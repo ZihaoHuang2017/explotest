@@ -133,17 +133,18 @@ def transform_tests_outer(ipython: IPython.InteractiveShell, filename, verbose, 
                     generate_tests(obj_result, var_name, ipython, verbose)
                 )
         except (SyntaxError, NameError) as e:
+            print(e)
             # raise e
             continue
         except SystemExit:
             logger.info(f"System exited")
             pass
-        # except Exception as e:
-        #     logger.info(f"Exception encountered {e}")
-        #     import_statements.add("import pytest")
-        #     normal_statements.append(f"with pytest.raises({type(e).__name__}):")
-        #     normal_statements.append(" " * INDENT_SIZE + lin)
-        #     continue
+        except Exception as e:
+            logger.info(f"Exception encountered {e}")
+            import_statements.add("import pytest")
+            normal_statements.append(f"with pytest.raises({type(e).__name__}):")
+            normal_statements.append(" " * INDENT_SIZE + lin)
+            continue
     print(f"{nondeterministic_counter} nondeterministic objects encountered in total")
     for statement in import_statements:
         lines = statement.split("\n")
