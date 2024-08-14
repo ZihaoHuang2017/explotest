@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ExploTest"
-version = "0.1.4"
+version = "0.1.5"
 authors = [
 {name="Zihao Huang", email="zihaohuang2017@gmail.com"}
 ]
