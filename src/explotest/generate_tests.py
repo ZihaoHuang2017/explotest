@@ -187,22 +187,23 @@ def generate_concise_tests(
             overall_assertions.insert(0, (level, f"assert {var_name} == {repr_str}"))
         return repr_str, overall_assertions
     if dataclasses.is_dataclass(obj):
-        reprs, overall_assertions = [], []
-        for field in dataclasses.fields(obj):
-            representation, assertions = generate_concise_tests(
-                getattr(obj, field.name),
-                f"{var_name}.{field.name}",
-                visited,
-                False,
-                ipython,
-                level + 1,
-            )
-            reprs.append(f"{repr(field.name)}: {representation}")
-            overall_assertions.extend(assertions)
-        repr_str = "{" + ", ".join(reprs) + "}"
-        if propagation:
-            overall_assertions.insert(0, (level, f"assert {var_name} == {repr_str}"))
-        return repr_str, overall_assertions
+        if is_legal_python_obj(type(obj).__name__, type(obj), ipython):
+            reprs, overall_assertions = [], []
+            for field in dataclasses.fields(obj):
+                representation, assertions = generate_concise_tests(
+                    getattr(obj, field.name),
+                    f"{var_name}.{field.name}",
+                    visited,
+                    False,
+                    ipython,
+                    level + 1,
+                )
+                reprs.append(f"{field.name}={representation}")
+                overall_assertions.extend(assertions)
+            repr_str = f"{type(obj).__name__}(" + ", ".join(reprs) + ")"
+            if propagation:
+                overall_assertions.insert(0, (level, f"assert {var_name} == {repr_str}"))
+            return repr_str, overall_assertions
     overall_assertions = [(level + 1, get_type_assertion(obj, var_name, ipython))]
     attrs = dir(obj)
     for attr in attrs:

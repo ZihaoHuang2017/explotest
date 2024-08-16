@@ -67,18 +67,26 @@ def func1() -> Bar:
     return result
 
 
-def func2(cond: bool) -> Bar:
+def func2(cond: bool) -> Bar:  # conditional run
     result = Bar("bruh")
     if cond:
         print("--explore", result.name)
     return result
 
-
-def func3():  # not this!
-    result = Foo("oof", Bar("bruh"))
-    a = result.bar
-    print("--explore", a.name)  # result.bar.name
+def func3():
+    result = [0, 0]
+    result[1] = result
+    print("--explore", result)
     return result
+
+def func3a():
+    result1 = [0, 0]
+    result2 = [1, 1]
+    result1[1] = result2
+    result2[1] = result1
+    print("--explore", result1)
+    print("--explore", result2)
+    return result1, result2
 
 
 def func4() -> list[Bar]:
